@@ -3,7 +3,7 @@
 Only accounts, public keys and hashed sessions are persisted. Transit slots
 exist for <= 20 seconds only while the sender's HTTP request is active.
 """
-import base64, hashlib, hmac, json, os, re, secrets, socket, sqlite3, ssl, threading, time
+import io, uuid, base64, hashlib, hmac, json, os, re, secrets, socket, sqlite3, ssl, threading, time
 from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -16,6 +16,7 @@ LOCK = threading.RLock()
 COND = threading.Condition(LOCK)
 POLLING = defaultdict(int)
 INFLIGHT = {}
+TYPING = {}
 LIMITS = defaultdict(deque)
 NICK = re.compile(r'^[a-z0-9_]{3,24}$')
 DB = None
@@ -28,6 +29,9 @@ def init_db(path=None):
  DB.execute('PRAGMA journal_mode=WAL')
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
+ DB.executescript('''CREATE TABLE IF NOT EXISTS profiles(nick TEXT PRIMARY KEY, avatar TEXT NOT NULL DEFAULT 'preset:0', bio TEXT NOT NULL DEFAULT '');
+ CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, avatar TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS members(room TEXT NOT NULL, nick TEXT NOT NULL, PRIMARY KEY(room,nick));''')
  DB.commit()
 
 class Problem(Exception):
@@ -48,7 +52,10 @@ def pw_hash(p,salt):return hashlib.scrypt(p.encode(),salt=bytes.fromhex(salt),n=
 def public_user(nick):
  with LOCK:row=DB.execute('SELECT nick,name,enc,sig FROM users WHERE nick=?',(nick,)).fetchone()
  if not row:raise Problem(404,'Пользователь не найден')
- return dict(zip(('nick','name','enc','sig'),row))
+ result=dict(zip(('nick','name','enc','sig'),row))
+ with LOCK:profile=DB.execute('SELECT avatar,bio FROM profiles WHERE nick=?',(nick,)).fetchone()
+ result.update(avatar=profile[0] if profile else 'preset:0',bio=profile[1] if profile else '')
+ return result
 def issue_session(nick):
  token=secrets.token_urlsafe(32)
  with LOCK:
@@ -57,9 +64,35 @@ def issue_session(nick):
   DB.commit()
  return token
 
+def room_info(rid, nick):
+ with LOCK:
+  row=DB.execute('SELECT id,title,kind,owner,avatar FROM rooms WHERE id=?',(rid,)).fetchone()
+  members=[r[0] for r in DB.execute('SELECT nick FROM members WHERE room=? ORDER BY nick',(rid,))]
+ if not row or nick not in members:raise Problem(404,'Чат не найден')
+ result=dict(zip(('id','title','kind','owner','avatar'),row));result['members']=members
+ return result
+
+def avatar_value(data):
+ value=data.get('avatar','preset:0')
+ if 'photo' not in data and isinstance(value,str) and re.fullmatch(r'preset:(?:[0-9]|1[01])',value):return value
+ raw=data.get('photo','')
+ if not isinstance(raw,str) or len(raw)>700000:raise Problem(400,'Фото слишком большое')
+ try:
+  from PIL import Image,ImageOps
+  image=Image.open(io.BytesIO(base64.b64decode(raw,validate=True)))
+  if image.width*image.height>4000000 or image.width<1 or image.height<1:raise ValueError()
+  image=ImageOps.exif_transpose(image).convert('RGB');image.thumbnail((512,512))
+  out=io.BytesIO();image.save(out,format='JPEG',quality=82);clean=out.getvalue()
+ except Exception:raise Problem(400,'Выберите обычное фото до 4 мегапикселей')
+ key=hashlib.sha256(clean).hexdigest();folder=ROOT/'avatars';folder.mkdir(mode=0o700,exist_ok=True)
+ path=folder/(key+'.jpg')
+ if not path.exists():
+  with open(path,'xb') as f:f.write(clean)
+ return 'photo:'+key
+
 class Handler(BaseHTTPRequestHandler):
  protocol_version='HTTP/1.1'
- server_version='OldyRelay/0.1'
+ server_version='OldyRelay/0.2'
  def setup(self):
   super().setup();self.connection.settimeout(35)
  def log_message(self,*args): pass # Never log request data, auth or envelopes.
@@ -84,11 +117,11 @@ class Handler(BaseHTTPRequestHandler):
     if self.headers.get('Transfer-Encoding'):raise Problem(400,'Unsupported request')
     try:n=int(self.headers.get('Content-Length','0'))
     except ValueError:raise Problem(400,'Invalid length')
-    if n<0 or n>MAX_BODY:raise Problem(413,'Запрос слишком большой')
+    if n<0 or n>(750000 if path in ('/profile','/room/update') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
     try:data=json.loads(self.rfile.read(n))
     except Exception:raise Problem(400,'Некорректный JSON')
     if not isinstance(data,dict):raise Problem(400,'Некорректный запрос')
-   if path=='/health' and not post:return self.reply({'service':'oldy-chat','version':1,'history':'devices-only'})
+   if path=='/health' and not post:return self.reply({'service':'oldy-chat','version':2,'history':'devices-only'})
    if path in ('/register','/login') and post:
     rate(('auth',self.client_address[0]),20,300)
     nick=str(data.get('nick','')).lower().strip();password=data.get('password','')
@@ -125,6 +158,69 @@ class Handler(BaseHTTPRequestHandler):
      if link.scheme!='https' or not link.hostname or link.username or link.password:raise ValueError()
      return self.reply({k:ad[k] for k in ('enabled','revision','title','text','url')})
     except (ValueError,KeyError):return self.reply({'enabled':False})
+   if path=='/profile' and post:
+    rate(('profile',nick),20,3600)
+    name=str(data.get('name',public_user(nick)['name'])).strip()[:40] or nick
+    bio=str(data.get('bio',public_user(nick)['bio'])).strip()[:160];avatar=avatar_value(data) if 'avatar' in data or 'photo' in data else public_user(nick)['avatar']
+    with LOCK:
+     DB.execute('UPDATE users SET name=? WHERE nick=?',(name,nick))
+     DB.execute('INSERT INTO profiles VALUES(?,?,?) ON CONFLICT(nick) DO UPDATE SET avatar=excluded.avatar,bio=excluded.bio',(nick,avatar,bio));DB.commit()
+    return self.reply(public_user(nick))
+   if path.startswith('/avatar/') and not post:
+    key=path[8:]
+    if not re.fullmatch('[0-9a-f]{64}',key):raise Problem(404,'Фото не найдено')
+    with LOCK:
+     used=DB.execute('SELECT 1 FROM profiles WHERE avatar=? UNION SELECT 1 FROM rooms WHERE avatar=?',('photo:'+key,'photo:'+key)).fetchone()
+    if not used:raise Problem(404,'Фото не найдено')
+    file=ROOT/'avatars'/(key+'.jpg')
+    if not file.exists():raise Problem(404,'Фото не найдено')
+    return self.reply({'photo':base64.b64encode(file.read_bytes()).decode()})
+   if path=='/rooms' and not post:
+    with LOCK:ids=[r[0] for r in DB.execute('SELECT room FROM members WHERE nick=?',(nick,))]
+    return self.reply({'rooms':[room_info(r,nick) for r in ids]})
+   if path.startswith('/room/') and not post:return self.reply(room_info(path[6:],nick))
+   if path=='/room/create' and post:
+    rate(('room-create',nick),10,3600)
+    title=str(data.get('title','')).strip()[:60];kind=data.get('kind');members=data.get('members',[])
+    if not title or kind not in ('group','channel') or not isinstance(members,list) or len(members)>49:raise Problem(400,'Укажите название и до 49 участников')
+    members=list(dict.fromkeys([nick]+[str(x) for x in members]))
+    for member in members:public_user(member)
+    rid=str(uuid.uuid4());av=data.get('avatar','preset:0')
+    if not isinstance(av,str) or not re.fullmatch(r'preset:(?:[0-9]|1[01])',av):av='preset:0'
+    with LOCK:
+     DB.execute('INSERT INTO rooms VALUES(?,?,?,?,?)',(rid,title,kind,nick,av))
+     DB.executemany('INSERT INTO members VALUES(?,?)',[(rid,m) for m in members]);DB.commit()
+    return self.reply(room_info(rid,nick))
+   if path=='/room/update' and post:
+    rate(('room-update',nick),30,3600)
+    rid=str(data.get('id',''));room=room_info(rid,nick)
+    if room['owner']!=nick:raise Problem(403,'Только создатель может менять чат')
+    members=data.get('members',room['members']);title=str(data.get('title',room['title'])).strip()[:60]
+    if not isinstance(members,list) or len(members)>50 or nick not in members or not title:raise Problem(400,'Неверный список участников')
+    members=list(dict.fromkeys(str(m) for m in members))
+    for m in members:public_user(m)
+    av=avatar_value(data) if 'avatar' in data or 'photo' in data else room['avatar']
+    with LOCK:
+     DB.execute('UPDATE rooms SET title=?,avatar=? WHERE id=?',(title,av,rid))
+     DB.execute('DELETE FROM members WHERE room=?',(rid,))
+     DB.executemany('INSERT INTO members VALUES(?,?)',[(rid,m) for m in members]);DB.commit()
+    return self.reply(room_info(rid,nick))
+   if path=='/room/leave' and post:
+    rid=str(data.get('id',''));room=room_info(rid,nick)
+    if room['owner']==nick:raise Problem(400,'Создатель остаётся в чате')
+    with LOCK:DB.execute('DELETE FROM members WHERE room=? AND nick=?',(rid,nick));DB.commit()
+    return self.reply({'ok':True})
+   if path=='/typing' and post:
+    target=str(data.get('to',''));public_user(target)
+    with LOCK:
+     now=time.monotonic()
+     for k in list(TYPING):
+      if TYPING[k]<now:del TYPING[k]
+     if len(TYPING)<2000:TYPING[(nick,target)]=now+6
+    return self.reply({'ok':True})
+   if path.startswith('/typing/') and not post:
+    peer=path[8:]
+    return self.reply({'typing':TYPING.get((peer,nick),0)>time.monotonic()})
    if path=='/me' and not post:return self.reply(public_user(nick))
    if path=='/logout' and post:
     with LOCK:DB.execute('DELETE FROM sessions WHERE hash=?',(hashlib.sha256(self.headers['Authorization'][7:].encode()).hexdigest(),));DB.commit()
@@ -135,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
     # Escape LIKE wildcard: underscores are literal nickname characters.
     escaped=q.replace('_','\\_')+'%'
     with LOCK:rows=DB.execute("SELECT nick,name,enc,sig FROM users WHERE nick LIKE ? ESCAPE '\\' AND nick!=? LIMIT 20",(escaped,nick)).fetchall()
-    return self.reply({'users':[dict(zip(('nick','name','enc','sig'),r)) for r in rows]})
+    return self.reply({'users':[public_user(r[0]) for r in rows]})
    if path.startswith('/user/') and not post:return self.reply(public_user(path[6:]))
    if path=='/poll' and not post:
     deadline=time.monotonic()+22
@@ -208,11 +304,14 @@ class Relay(ThreadingHTTPServer):
 
 def main():
  import argparse
- p=argparse.ArgumentParser();p.add_argument('--host',default='0.0.0.0');p.add_argument('--port',type=int,default=8443);p.add_argument('--cert');p.add_argument('--key');p.add_argument('--test-http',action='store_true');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--host',default='0.0.0.0');p.add_argument('--port',type=int,default=8443);p.add_argument('--cert');p.add_argument('--key');p.add_argument('--test-http',action='store_true');p.add_argument('--also-443',action='store_true');a=p.parse_args()
  if a.test_http and a.host not in ('127.0.0.1','::1'):p.error('Test HTTP is localhost-only')
  if not a.test_http and not(a.cert and a.key):p.error('TLS certificate and key required')
  init_db();srv=Relay((a.host,a.port),Handler)
  if not a.test_http:
   tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2;tls.load_cert_chain(a.cert,a.key);srv.tls=tls
+ if a.also_443:
+  second=Relay((a.host,443),Handler);second.tls=srv.tls
+  threading.Thread(target=second.serve_forever,daemon=True).start()
  print('Oldy relay started',flush=True);srv.serve_forever()
 if __name__=='__main__':main()

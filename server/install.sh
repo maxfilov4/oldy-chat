@@ -4,9 +4,15 @@ set -euo pipefail
 if [[ $(id -u) != 0 ]]; then echo 'Run this installer as root.'; exit 1; fi
 oldy_src="$(cd "$(dirname "$0")" && pwd)"
 if [[ ! -f "$oldy_src/server.py" ]]; then echo 'server.py is missing'; exit 1; fi
+if ss -H -ltnp '( sport = :443 )' | grep -q .; then
+ oldy_pid=$(systemctl show oldy-chat --property MainPID --value 2>/dev/null || true)
+ if [[ -z "$oldy_pid" || "$oldy_pid" == 0 ]] || ! ss -H -ltnp '( sport = :443 )' | grep -q "pid=$oldy_pid,"; then
+  echo 'Port 443 is used by another service. Existing service left unchanged.' >&2; exit 1
+ fi
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y python3 python3-cryptography openssl
+apt-get install -y python3 python3-cryptography python3-pil openssl coturn
 id oldy-chat >/dev/null 2>&1 || useradd --system --home /var/lib/oldy-chat --shell /usr/sbin/nologin oldy-chat
 install -d -o root -g root -m 755 /opt/oldy-chat
 install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
@@ -27,10 +33,12 @@ Wants=network-online.target
 User=oldy-chat
 Group=oldy-chat
 Environment=OLDY_DATA=/var/lib/oldy-chat
-ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key
+ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key --also-443
 Restart=on-failure
 RestartSec=5
 UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -46,14 +54,44 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now oldy-chat
 systemctl restart oldy-chat
-if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then ufw allow 8443/tcp comment 'Oldy Chat'; fi
-python3 - <<'PY'
+if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then ufw allow 8443/tcp comment 'Oldy Chat'; ufw allow 443/tcp comment 'Oldy Chat HTTPS'; ufw allow 3478/udp comment 'Oldy Chat direct media'; fi
+cat > /etc/oldy-chat/stun.conf <<'STUN'
+stun-only
+listening-port=3478
+listening-ip=0.0.0.0
+no-tls
+no-dtls
+no-cli
+no-software-attribute
+log-file=stdout
+STUN
+cat > /etc/systemd/system/oldy-stun.service <<'UNIT'
+[Unit]
+Description=Oldy Chat STUN discovery (no media relay)
+After=network-online.target
+[Service]
+User=oldy-chat
+Group=oldy-chat
+ExecStart=/usr/bin/turnserver -c /etc/oldy-chat/stun.conf
+Restart=on-failure
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+MemoryMax=96M
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now oldy-stun
+systemctl restart oldy-stun
+python3 - <<'PY' 
 import ssl,urllib.request,time
 ctx=ssl.create_default_context(cafile='/etc/oldy-chat/server.crt')
 for attempt in range(10):
  try:
   # Local check keeps hostname verification enabled for the IP certificate.
-  with urllib.request.urlopen('https://5.42.102.11:8443/health',context=ctx,timeout=3) as r:
+  with urllib.request.urlopen('https://5.42.102.11/health',context=ctx,timeout=3) as r:
    print(r.read().decode());break
  except Exception:
   if attempt==9:raise
@@ -61,6 +99,6 @@ for attempt in range(10):
 PY
 echo
 echo 'OLDY CHAT: SERVER READY'
-echo 'Address: https://5.42.102.11:8443'
+echo 'HTTPS 443 ready; 8443 kept for existing phones.'
 openssl x509 -in /etc/oldy-chat/server.crt -noout -fingerprint -sha256
-echo 'Paste the SHA-256 fingerprint into Oldy Chat settings on each phone.'
+echo 'OLDY CHAT 0.2: UPDATE COMPLETE. Install the new APK on both phones.'

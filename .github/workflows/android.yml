@@ -29,7 +29,7 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Server tests
         run: |
-          python3 -m pip install cryptography
+          python3 -m pip install cryptography pillow
           python3 -m unittest discover -s tests -v
       - name: Build signed APK
         run: bash tools/build-apk.sh
@@ -59,6 +59,7 @@ jobs:
             build/screenshots
             build/android-errors.log
             build/crypto-results.txt
+            build/feature-results.txt
             build/window.xml
             build/chats.xml
             build/conversation.xml

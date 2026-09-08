@@ -10,10 +10,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: android-actions/setup-android@v4
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Prepare compiler and direct-transfer SDK
         run: |
+          jlink --add-modules java.base,java.compiler,jdk.compiler,jdk.jartool,jdk.crypto.ec,java.logging,jdk.unsupported,java.xml --output build/dev/jdk
           mkdir -p build/dev/sdk/platforms/android-35 build/dev/sdk/build-tools build/dev/webrtc
           cp "$ANDROID_HOME/platforms/android-35/android.jar" build/dev/sdk/platforms/android-35/
           cp -r "$ANDROID_HOME/build-tools/35.0.0" build/dev/sdk/build-tools/
