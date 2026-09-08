@@ -112,6 +112,19 @@ class Handler(BaseHTTPRequestHandler):
      if not r or not hmac.compare_digest(candidate,r[1]):raise Problem(401,'Неверный ник или пароль')
     return self.reply({'token':issue_session(nick),'user':public_user(nick)})
    nick=self.user()
+   if path=='/campaign' and not post:
+    config=ROOT/'campaign.json'
+    if not config.exists():return self.reply({'enabled':False})
+    try:
+     ad=json.loads(config.read_text())
+     if ad.get('enabled') is not True:return self.reply({'enabled':False})
+     if not isinstance(ad.get('revision'),int) or ad['revision']<1:raise ValueError()
+     for key,limit in [('title',80),('text',1000),('url',500)]:
+      if not isinstance(ad.get(key),str) or len(ad[key])>limit:raise ValueError()
+     link=urlsplit(ad['url'])
+     if link.scheme!='https' or not link.hostname or link.username or link.password:raise ValueError()
+     return self.reply({k:ad[k] for k in ('enabled','revision','title','text','url')})
+    except (ValueError,KeyError):return self.reply({'enabled':False})
    if path=='/me' and not post:return self.reply(public_user(nick))
    if path=='/logout' and post:
     with LOCK:DB.execute('DELETE FROM sessions WHERE hash=?',(hashlib.sha256(self.headers['Authorization'][7:].encode()).hexdigest(),));DB.commit()

@@ -22,7 +22,7 @@ HTTPS checks the exact certificate SHA-256 fingerprint entered from the server c
 4. Register using a nickname and a password. Make an encrypted backup in settings and keep its separate password safe. Restoring an existing account on a new phone requires the old private keys from that backup.
 5. Allow notifications for the foreground service. Find your friend's nickname and send messages. A clock means pending; two checks mean received and saved by the other phone, not read.
 
-The current mascot is an original animated code illustration of a grandfather typing on a smartphone; it is not the polished raster reference render. Advertising is disabled; there is no ad SDK or campaign backend in this beta. Attachments, groups, calls, read receipts, device synchronization and automatic updates are not implemented.
+The current mascot is an original animated code illustration of a grandfather typing on a smartphone; it is not the polished raster reference render. Advertising is disabled by default. To prepare a future campaign, copy `server/campaign.example.json` to `/var/lib/oldy-chat/campaign.json` on the server and configure its contents. An enabled campaign displays a dismissible, explicitly labelled ad once per revision when opening the chat list. There is no advertising SDK or payment/advertiser integration. Attachments, groups, calls, read receipts, device synchronization and automatic updates are not implemented.
 
 ## Build and checks
 

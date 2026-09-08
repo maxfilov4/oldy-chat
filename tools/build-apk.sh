@@ -7,7 +7,7 @@ bt="$sdk/build-tools/35.0.0"
 android="$sdk/platforms/android-35/android.jar"
 mkdir -p build/generated build/classes build/dex .keys
 "$bt/aapt2" compile --dir app/src/main/res -o build/resources.zip
-"$bt/aapt2" link -I "$android" --manifest app/src/main/AndroidManifest.xml --java build/generated -A app/src/main/assets -o build/base.apk build/resources.zip
+"$bt/aapt2" link -I "$android" --manifest app/src/main/AndroidManifest.xml --java build/generated -o build/base.apk build/resources.zip
 find app/src/main/java build/generated -name '*.java' > build/sources.txt
 javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$android" -d build/classes @build/sources.txt
 jar cf build/classes.jar -C build/classes .
