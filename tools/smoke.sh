@@ -5,8 +5,7 @@ adb install -r build/OldyChat-beta.apk
 adb logcat -c
 adb shell am start -W -n chat.oldy/.MainActivity
 sleep 3
-adb shell uiautomator dump /sdcard/window.xml
-adb pull /sdcard/window.xml build/window.xml
+python3 tools/ui-dump.py build/window.xml 'Регистрация'
 python3 - <<'PY'
 from pathlib import Path
 s=Path('build/window.xml').read_text()
@@ -46,8 +45,7 @@ adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
 adb shell am start -W -n chat.oldy/.MainActivity
 sleep 3
 adb exec-out screencap -p > build/screenshots/02-chats.png
-adb shell uiautomator dump /sdcard/chats.xml
-adb pull /sdcard/chats.xml build/chats.xml
+python3 tools/ui-dump.py build/chats.xml 'Борис'
 python3 - <<'PY'
 import xml.etree.ElementTree as ET,re,subprocess
 nodes=list(ET.parse('build/chats.xml').iter('node'))
@@ -57,8 +55,7 @@ subprocess.run(['adb','shell','input','tap',str((x+r)//2),str((y+b)//2)],check=T
 PY
 sleep 2
 adb exec-out screencap -p > build/screenshots/03-conversation.png
-adb shell uiautomator dump /sdcard/conversation.xml
-adb pull /sdcard/conversation.xml build/conversation.xml
+python3 tools/ui-dump.py build/conversation.xml 'Как тебе OldЫ Chat?'
 python3 - <<'PY'
 from pathlib import Path
 s=Path('build/conversation.xml').read_text()
