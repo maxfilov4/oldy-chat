@@ -24,7 +24,7 @@ public class MainActivity extends Activity {
  boolean registeredReceiver,active;String backupText;char[] restorePassword;MediaRecorder recorder;File recording;MediaPlayer player;long lastTyping;int filter;
  interface Job{void run()throws Exception;}
  final BroadcastReceiver refresh=new BroadcastReceiver(){public void onReceive(Context c,Intent i){if(network!=null)network.setText(ChatService.state);if(screen.equals("chats"))renderChats();if(screen.equals("chat"))renderMessages();}};
- public void onCreate(Bundle b){super.onCreate(b);api=new Api(this);try{vault=ChatService.vault(this);}catch(Exception e){dialog().setTitle("Не удалось открыть историю").setMessage("Данные сохранены. Попробуйте перезапустить приложение.").setPositiveButton("Закрыть",(d,w)->finish()).show();return;}
+ public void onCreate(Bundle b){super.onCreate(b);api=new Api(this);File[] stale=getCacheDir().listFiles((dir,name)->name.startsWith("voice-")&&name.endsWith(".m4a"));if(stale!=null)for(File f:stale)f.delete();try{vault=ChatService.vault(this);}catch(Exception e){dialog().setTitle("Не удалось открыть историю").setMessage("Данные сохранены. Попробуйте перезапустить приложение.").setPositiveButton("Закрыть",(d,w)->finish()).show();return;}
   splash();ui.postDelayed(()->{if(isFinishing())return;if(vault.token().isEmpty())auth(false);else{chats();startChat();openFromIntent(getIntent());}},1300);
  }
  public void onNewIntent(Intent i){super.onNewIntent(i);setIntent(i);if(vault!=null&&!vault.token().isEmpty())openFromIntent(i);}

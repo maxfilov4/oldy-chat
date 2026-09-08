@@ -11,10 +11,10 @@ final class Notices {
   boolean sound=prefs(c).getBoolean("sound",true),vibrate=prefs(c).getBoolean("vibration",true),preview=prefs(c).getBoolean("preview",false);
   String ch="messages_2_"+(sound?"s":"q")+(vibrate?"v":"n");
   NotificationManager nm=c.getSystemService(NotificationManager.class);NotificationChannel channel=new NotificationChannel(ch,"Сообщения"+(sound?" · Oldy Pop":" · без звука"),NotificationManager.IMPORTANCE_HIGH);
-  channel.setSound(sound?Uri.parse("android.resource://"+c.getPackageName()+"/"+R.raw.oldy_chime):null,new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build());channel.enableVibration(vibrate);channel.setVibrationPattern(new long[]{0,80,70,80});nm.createNotificationChannel(channel);
+  channel.setSound(sound?Uri.parse("android.resource://"+c.getPackageName()+"/"+R.raw.oldy_chime):null,new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build());if(vibrate)channel.setVibrationPattern(new long[]{0,80,70,80});channel.enableVibration(vibrate);nm.createNotificationChannel(channel);
   String peer=m.optString("peer");Intent i=new Intent(c,MainActivity.class).putExtra("chat",peer).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
   PendingIntent p=PendingIntent.getActivity(c,peer.hashCode(),i,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-  Notification n=new Notification.Builder(c,ch).setSmallIcon(R.drawable.ic_launcher).setContentTitle(user.optString("name","OldЫ Chat")).setContentText(preview?Payload.preview(m):"Новое сообщение").setContentIntent(p).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setVisibility(preview?Notification.VISIBILITY_PRIVATE:Notification.VISIBILITY_SECRET).build();
+  Notification n=new Notification.Builder(c,ch).setSmallIcon(R.drawable.ic_launcher).setContentTitle(user.optString("name","OldЫ Chat")).setContentText(preview?Payload.preview(m):"Новое сообщение").setContentIntent(p).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(new Notification.Builder(c,ch).setSmallIcon(R.drawable.ic_launcher).setContentTitle("OldЫ Chat").setContentText("Новое сообщение").build()).build();
   try{nm.notify(peer.hashCode(),n);}catch(SecurityException ignored){}
  }
 }

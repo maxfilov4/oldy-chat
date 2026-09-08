@@ -10,9 +10,14 @@ if ss -H -ltnp '( sport = :443 )' | grep -q .; then
   echo 'Port 443 is used by another service. Existing service left unchanged.' >&2; exit 1
  fi
 fi
+oldy_coturn_present=0
+if dpkg-query -W -f='${Status}' coturn 2>/dev/null | grep -q 'install ok installed'; then oldy_coturn_present=1; fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3 python3-cryptography python3-pil openssl coturn
+# A newly installed package may start its default TURN service. Only stop it
+# if it did not exist before this installer; never replace an existing TURN setup.
+if [[ "$oldy_coturn_present" == 0 ]]; then systemctl disable --now coturn.service 2>/dev/null || true; fi
 id oldy-chat >/dev/null 2>&1 || useradd --system --home /var/lib/oldy-chat --shell /usr/sbin/nologin oldy-chat
 install -d -o root -g root -m 755 /opt/oldy-chat
 install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
@@ -83,8 +88,12 @@ MemoryMax=96M
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now oldy-stun
-systemctl restart oldy-stun
+if ss -H -lunp '( sport = :3478 )' | grep -q . && ! systemctl is-active --quiet oldy-stun; then
+ echo 'UDP 3478 is used by an existing service. It was left unchanged; direct-media discovery needs review.'
+else
+ systemctl enable --now oldy-stun
+ systemctl restart oldy-stun
+fi
 python3 - <<'PY' 
 import ssl,urllib.request,time
 ctx=ssl.create_default_context(cafile='/etc/oldy-chat/server.crt')

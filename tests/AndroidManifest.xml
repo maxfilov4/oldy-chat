@@ -3,4 +3,5 @@
  <application android:label="Oldy tests"/>
  <instrumentation android:name="chat.oldy.CryptoInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.FeatureInstrumentation" android:targetPackage="chat.oldy"/>
+ <instrumentation android:name="chat.oldy.ScreenOffInstrumentation" android:targetPackage="chat.oldy"/>
 </manifest>

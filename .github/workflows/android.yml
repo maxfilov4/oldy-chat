@@ -60,6 +60,7 @@ jobs:
             build/android-errors.log
             build/crypto-results.txt
             build/feature-results.txt
+            build/screen-off-results.txt
             build/window.xml
             build/chats.xml
             build/conversation.xml
