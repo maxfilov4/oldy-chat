@@ -59,6 +59,11 @@ from pathlib import Path
 s=Path('build/conversation.xml').read_text()
 assert 'Как тебе OldЫ Chat?' in s,s
 assert 'Сообщение' in s,s
+import xml.etree.ElementTree as ET,re
+for node in ET.fromstring(s).iter('node'):
+ if 'Как тебе OldЫ Chat?' in node.get('text','') or 'Уже проверяю' in node.get('text',''):
+  x,y,r,b=map(int,re.findall(r'\d+',node.get('bounds')))
+  assert r-x>100 and b-y>25, ('Message is not visibly laid out',node.attrib)
 print('PASS: encrypted history restored and conversation rendered')
 PY
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
