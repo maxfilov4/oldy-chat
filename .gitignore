@@ -1,0 +1,9 @@
+build/
+.keys/
+*.jks
+*.keystore
+local.properties
+__pycache__/
+*.sqlite3*
+*.pem
+*.key
