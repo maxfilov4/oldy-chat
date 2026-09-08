@@ -17,8 +17,8 @@ final class Vault {
   committed=data.toString();
  }
  synchronized void save()throws Exception {
-  byte[] bytes=Crypto.sealLocal(Crypto.bytes(data.toString()));FileOutputStream out=null;
-  try{out=file.startWrite();out.write(bytes);file.finishWrite(out);committed=data.toString();}catch(Exception e){if(out!=null)file.failWrite(out);data=new JSONObject(committed);throw e;}
+  FileOutputStream out=null;
+  try{byte[] bytes=Crypto.sealLocal(Crypto.bytes(data.toString()));out=file.startWrite();out.write(bytes);file.finishWrite(out);committed=data.toString();}catch(Exception e){if(out!=null)file.failWrite(out);data=new JSONObject(committed);throw e;}
  }
  synchronized JSONObject copy()throws Exception{return new JSONObject(data.toString());}
  synchronized JSONObject identity()throws Exception{

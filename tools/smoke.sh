@@ -2,18 +2,6 @@
 set -euo pipefail
 mkdir -p build/screenshots
 adb install -r build/OldyChat-beta.apk
-adb install -r build/OldyChat-tests.apk
-python3 tests/device-server.py > build/device-server.log 2>&1 &
-server_pid=$!
-trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-for attempt in $(seq 1 30); do
- if [[ -f build/device-server/pin.txt ]]; then break; fi
- sleep 1
-done
-pin=$(cat build/device-server/pin.txt)
-adb shell am instrument -w -e pin "$pin" chat.oldy.tests/chat.oldy.CryptoInstrumentation > build/crypto-results.txt
-cat build/crypto-results.txt
-rg -q 'OLDY_CRYPTO_PASS' build/crypto-results.txt
 adb logcat -c
 adb shell am start -W -n chat.oldy/.MainActivity
 sleep 3
@@ -29,5 +17,42 @@ assert 'FATAL EXCEPTION' not in s
 print('PASS: login screen rendered on Android')
 PY
 adb exec-out screencap -p > build/screenshots/01-login.png
+adb install -r build/OldyChat-tests.apk
+python3 tests/device-server.py > build/device-server.log 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+for attempt in $(seq 1 30); do
+ if [[ -f build/device-server/pin.txt ]]; then break; fi
+ sleep 1
+done
+pin=$(cat build/device-server/pin.txt)
+adb shell am instrument -w -e pin "$pin" chat.oldy.tests/chat.oldy.CryptoInstrumentation > build/crypto-results.txt
+cat build/crypto-results.txt
+rg -q 'OLDY_CRYPTO_PASS' build/crypto-results.txt
+adb shell am force-stop chat.oldy
+adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
+adb shell am start -W -n chat.oldy/.MainActivity
+sleep 3
+adb exec-out screencap -p > build/screenshots/02-chats.png
+adb shell uiautomator dump /sdcard/chats.xml
+adb pull /sdcard/chats.xml build/chats.xml
+python3 - <<'PY'
+import xml.etree.ElementTree as ET,re,subprocess
+nodes=list(ET.parse('build/chats.xml').iter('node'))
+node=next(n for n in nodes if n.get('text')=='Борис')
+x,y,r,b=map(int,re.findall(r'\d+',node.get('bounds')))
+subprocess.run(['adb','shell','input','tap',str((x+r)//2),str((y+b)//2)],check=True)
+PY
+sleep 2
+adb exec-out screencap -p > build/screenshots/03-conversation.png
+adb shell uiautomator dump /sdcard/conversation.xml
+adb pull /sdcard/conversation.xml build/conversation.xml
+python3 - <<'PY'
+from pathlib import Path
+s=Path('build/conversation.xml').read_text()
+assert 'Как тебе OldЫ Chat?' in s,s
+assert 'Сообщение' in s,s
+print('PASS: encrypted history restored and conversation rendered')
+PY
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if rg -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi

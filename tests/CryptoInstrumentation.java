@@ -29,6 +29,14 @@ public class CryptoInstrumentation extends Instrumentation {
    api.call("/ack",new JSONObject().put("from","alice").put("id",e.getString("id")),b.getString("token"));require(send.get(25,TimeUnit.SECONDS).getBoolean("delivered"),"Delivery acknowledgement");
   }finally{pool.shutdownNow();}
   api.configure("https://10.0.2.2:8444",new String(new char[64]).replace('\0','0'));rejected=false;try{api.call("/me",null,a.getString("token"));}catch(Exception expected){rejected=true;}require(rejected,"Wrong certificate pin accepted");
+  // Emulator-only fixtures for testing real activity layouts and encrypted persistence.
+  Vault v=ChatService.vault(getTargetContext());
+  synchronized(v){v.data.put("identity",alice);v.account(a);v.pin(b.getJSONObject("user"));}
+  JSONObject incoming=Crypto.encrypt("bobby","alice","Привет! Уже проверяю наш чат 😎",java.util.UUID.randomUUID().toString(),System.currentTimeMillis(),bob,alice);
+  v.receive(incoming,b.getJSONObject("user"));v.receive(incoming,b.getJSONObject("user"));require(v.copy().getJSONArray("messages").length()==1,"Duplicate persisted twice");
+  v.queue("bobby","Привет! Как тебе OldЫ Chat? 💚");String fixtureId=v.copy().getJSONArray("messages").getJSONObject(1).getString("id");v.delivered(fixtureId);
+  Vault reopened=new Vault(getTargetContext());require(reopened.copy().getJSONArray("messages").length()==2,"Saved vault not recovered");
+  new Api(getTargetContext()).configure("https://10.0.2.2:8444",args.getString("pin"));
   result.putString("stream","OLDY_CRYPTO_PASS: local vault, authenticated encryption, tamper rejection, backup, pinned TLS, actual relay delivery\n");finish(-1,result);
  }catch(Throwable e){result.putString("stream","OLDY_CRYPTO_FAIL: "+e.toString()+"\n"+android.util.Log.getStackTraceString(e));finish(0,result);}}
 }
