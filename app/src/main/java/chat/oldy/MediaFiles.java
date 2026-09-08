@@ -10,10 +10,10 @@ final class MediaFiles {
  static File folder(Context c){File d=new File(c.getFilesDir(),"media");d.mkdirs();return d;}
  static File path(Context c,String key)throws Exception{if(!key.matches("[a-f0-9-]{36}"))throw new IOException("Файл недоступен");return new File(folder(c),key+".oldym");}
  static class Writer implements AutoCloseable{
-  final File target,temp;final DataOutputStream out;final MessageDigest digest;long size;boolean finished;
-  Writer(Context c,String key)throws Exception{target=path(c,key);temp=new File(target+".part");out=new DataOutputStream(new FileOutputStream(temp));digest=MessageDigest.getInstance("SHA-256");}
+  final File target,temp;final DataOutputStream out;final FileOutputStream disk;final MessageDigest digest;long size;boolean finished;
+  Writer(Context c,String key)throws Exception{target=path(c,key);temp=new File(target+".part");disk=new FileOutputStream(temp);out=new DataOutputStream(disk);digest=MessageDigest.getInstance("SHA-256");}
   void put(byte[] b)throws Exception{if(b.length>32768||size+b.length>MAX)throw new IOException("Лимит вложения — 25 МБ");byte[] encrypted=Crypto.sealLocal(b);out.writeInt(encrypted.length);out.write(encrypted);digest.update(b);size+=b.length;}
-  String finish()throws Exception{out.flush();out.close();if(!temp.renameTo(target))throw new IOException("Не удалось сохранить файл");finished=true;return Crypto.hex(digest.digest());}
+  String finish()throws Exception{out.flush();disk.getFD().sync();out.close();if(!temp.renameTo(target))throw new IOException("Не удалось сохранить файл");finished=true;return Crypto.hex(digest.digest());}
   public void close(){try{out.close();}catch(Exception ignored){}if(!finished)temp.delete();}
  }
  static InputStream open(Context c,String key)throws Exception{return new InputStream(){final DataInputStream in=new DataInputStream(new FileInputStream(path(c,key)));byte[] chunk=new byte[0];int at;boolean eof;

@@ -62,6 +62,8 @@ systemctl restart oldy-chat
 if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then ufw allow 8443/tcp comment 'Oldy Chat'; ufw allow 443/tcp comment 'Oldy Chat HTTPS'; ufw allow 3478/udp comment 'Oldy Chat direct media'; fi
 cat > /etc/oldy-chat/stun.conf <<'STUN'
 stun-only
+no-tcp
+pidfile=/run/oldy-stun/turnserver.pid
 listening-port=3478
 listening-ip=0.0.0.0
 no-tls
@@ -77,6 +79,7 @@ After=network-online.target
 [Service]
 User=oldy-chat
 Group=oldy-chat
+RuntimeDirectory=oldy-stun
 ExecStart=/usr/bin/turnserver -c /etc/oldy-chat/stun.conf
 Restart=on-failure
 NoNewPrivileges=true

@@ -36,6 +36,11 @@ grep -q 'OLDY_FEATURES_PASS' build/feature-results.txt
 timeout 150s adb shell am instrument -w -e pin "$pin" chat.oldy.tests/chat.oldy.ScreenOffInstrumentation > build/screen-off-results.txt
 cat build/screen-off-results.txt
 grep -q 'OLDY_SCREEN_OFF_PASS' build/screen-off-results.txt
+# Instrumentation finish can end its process before Java finally restores the screen.
+adb shell input keyevent 224
+adb shell input keyevent 82
+adb shell wm dismiss-keyguard
+sleep 2
 adb shell am force-stop chat.oldy
 adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
 adb shell am start -W -n chat.oldy/.MainActivity
