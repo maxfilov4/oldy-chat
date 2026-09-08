@@ -9,7 +9,7 @@ mkdir -p build/generated build/classes build/dex .keys
 "$bt/aapt2" compile --dir app/src/main/res -o build/resources.zip
 "$bt/aapt2" link -I "$android" --manifest app/src/main/AndroidManifest.xml --java build/generated -o build/base.apk build/resources.zip
 find app/src/main/java build/generated -name '*.java' > build/sources.txt
-javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$android" -d build/classes @build/sources.txt
+javac -encoding UTF-8 --release 8 -classpath "$android" -d build/classes @build/sources.txt
 jar cf build/classes.jar -C build/classes .
 "$bt/d8" --lib "$android" --min-api 26 --output build/dex build/classes.jar
 cp build/base.apk build/unsigned.apk
@@ -22,7 +22,7 @@ fi
 "$bt/apksigner" verify --verbose build/OldyChat-beta.apk
 echo 'Built build/OldyChat-beta.apk'
 mkdir -p build/test-classes build/test-dex
-javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$android" -classpath build/classes -d build/test-classes tests/CryptoInstrumentation.java
+javac -encoding UTF-8 --release 8 -classpath "$android:build/classes" -d build/test-classes tests/CryptoInstrumentation.java
 jar cf build/tests.jar -C build/test-classes .
 "$bt/d8" --lib "$android" --classpath build/classes.jar --min-api 26 --output build/test-dex build/tests.jar
 "$bt/aapt2" link -I "$android" --manifest tests/AndroidManifest.xml -o build/test-base.apk
