@@ -1,0 +1,27 @@
+name: Prepare native Android build dependencies
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.actor == 'maxfilov4' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Prepare compiler and direct-transfer SDK
+        run: |
+          mkdir -p build/dev/sdk/platforms/android-35 build/dev/sdk/build-tools build/dev/webrtc
+          cp "$ANDROID_HOME/platforms/android-35/android.jar" build/dev/sdk/platforms/android-35/
+          cp -r "$ANDROID_HOME/build-tools/35.0.0" build/dev/sdk/build-tools/
+          curl --fail --location --retry 2 https://repo.maven.apache.org/maven2/io/github/webrtc-sdk/android/144.7559.12/android-144.7559.12.aar -o build/dev/webrtc/sdk.aar
+          unzip -q build/dev/webrtc/sdk.aar -d build/dev/webrtc/aar
+          javap -classpath build/dev/webrtc/aar/classes.jar 'org.webrtc.PeerConnection$Observer' org.webrtc.DataChannel org.webrtc.PeerConnectionFactory > build/dev/webrtc-api.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Oldy-development-tools
+          path: build/dev
+          retention-days: 3
