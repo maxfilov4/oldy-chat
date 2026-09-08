@@ -28,7 +28,7 @@ done
 pin=$(cat build/device-server/pin.txt)
 adb shell am instrument -w -e pin "$pin" chat.oldy.tests/chat.oldy.CryptoInstrumentation > build/crypto-results.txt
 cat build/crypto-results.txt
-rg -q 'OLDY_CRYPTO_PASS' build/crypto-results.txt
+grep -q 'OLDY_CRYPTO_PASS' build/crypto-results.txt
 adb shell am force-stop chat.oldy
 adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
 adb shell am start -W -n chat.oldy/.MainActivity
@@ -55,4 +55,4 @@ assert 'Сообщение' in s,s
 print('PASS: encrypted history restored and conversation rendered')
 PY
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
-if rg -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi
+if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi

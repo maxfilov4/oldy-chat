@@ -6,7 +6,7 @@ permissions:
   contents: read
 concurrency:
   group: oldy-beta-build
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   android:
     if: github.actor == 'maxfilov4' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -47,8 +47,10 @@ jobs:
           disable-animations: true
           script: bash tools/smoke.sh
       - name: Package installer
+        if: always()
         run: python3 tools/package-installer.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: OldyChat-beta
           path: |
@@ -57,4 +59,7 @@ jobs:
             build/screenshots
             build/android-errors.log
             build/crypto-results.txt
+            build/window.xml
+            build/chats.xml
+            build/conversation.xml
           retention-days: 30
