@@ -18,7 +18,7 @@ HTTPS checks the exact certificate SHA-256 fingerprint entered from the server c
 
 1. Download the signed `OldyChat-beta.apk` and `Install-OldyChat.txt` from the successful Actions artifact.
 2. Review the installer in `server/install.sh`. Paste the full contents of `Install-OldyChat.txt` into your Ubuntu 24.04 root console. It embeds the server source, needs no GitHub token, installs Python/cryptography, creates an unprivileged systemd service and self-signed TLS certificate for `5.42.102.11`, opens TCP 8443 if UFW is already enabled, and prints SHA-256.
-3. In app settings enter `https://5.42.102.11:8443` and the printed certificate fingerprint. Distribute the same fingerprint to invited testers through a trusted channel.
+3. Version 0.1.1 includes the owner's server address and public certificate fingerprint, verified from the installation console. New users can register immediately without opening settings or entering a fingerprint. The first 0.1.0 build required manual configuration. Existing manually configured connections are preserved. A changed/renewed certificate requires an owner-signed app update or an explicitly verified configuration change; verification is never disabled.
 4. Register using a nickname and a password. Make an encrypted backup in settings and keep its separate password safe. Restoring an existing account on a new phone requires the old private keys from that backup.
 5. Allow notifications for the foreground service. Find your friend's nickname and send messages. A clock means pending; two checks mean received and saved by the other phone, not read.
 

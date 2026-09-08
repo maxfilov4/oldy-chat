@@ -10,10 +10,14 @@ import java.security.cert.*;
 import javax.net.ssl.*;
 
 final class Api {
+ static final String DEFAULT_URL="https://5.42.102.11:8443";
+ // Public certificate fingerprint verified from the owner's server console.
+ // This is not an administrator credential or a private encryption/signing key.
+ static final String DEFAULT_PIN="A84186AD26B22E7D69F23D1838A9DB5A2B277A6D567D6E49249C7714153E5D4A";
  final SharedPreferences prefs;
  Api(Context c){prefs=c.getSharedPreferences("connection",0);}
- String url(){return prefs.getString("url","https://5.42.102.11:8443");}
- String pin(){return prefs.getString("pin","");}
+ String url(){return prefs.getString("url",DEFAULT_URL);}
+ String pin(){return prefs.getString("pin",url().equals(DEFAULT_URL)?DEFAULT_PIN:"");}
  static String clean(String value)throws Exception{
   URI u=new URI(value.trim());if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null||!(u.getPath()==null||u.getPath().isEmpty()||u.getPath().equals("/")))throw new Exception("Введите HTTPS-адрес без пути, например https://5.42.102.11:8443");
   return value.trim().replaceAll("/+$","");
