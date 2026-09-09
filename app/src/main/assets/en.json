@@ -873,5 +873,9 @@
   "Этот @адрес или e-mail уже используется": "This @address or email is already in use",
   "Комментарии не найдены": "Comments not found",
   "Пост пока не синхронизирован": "The post has not synced yet",
-  "Идентификатор уже использован": "This identifier is already in use"
+  "Идентификатор уже использован": "This identifier is already in use",
+  "Предел записи достигнут · отпусти для отправки": "Recording limit reached · release to send",
+  "♫ Аудиофайл": "♫ Audio file",
+  "Аудиофайл": "Audio file",
+  "Выбери MP3, WAV, M4A, OGG или FLAC": "Choose MP3, WAV, M4A, OGG or FLAC"
 }

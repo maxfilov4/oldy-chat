@@ -6,7 +6,7 @@ import android.net.*;
 import org.json.*;
 import java.util.concurrent.*;
 public class ChatService extends Service {
- static volatile ChatService instance;static volatile String state=I18n.t("Нет подключения");static volatile String visibleChat="";
+ static volatile ChatService instance;static volatile String state="Нет подключения";static volatile String visibleChat="";
  volatile boolean running;Thread incoming,outgoing;Vault vault;Api api;Rtc rtc;PowerManager.WakeLock wake;ConnectivityManager.NetworkCallback callback;
  final ExecutorService signals=Executors.newFixedThreadPool(3);static Vault shared;
  static synchronized Vault vault(Context c)throws Exception{if(shared==null)shared=new Vault(c.getApplicationContext());return shared;}
@@ -33,10 +33,10 @@ public class ChatService extends Service {
  void signal(String peer,JSONObject body){if(!running||signals.isShutdown())return;signals.execute(()->{try{JSONObject user=api.call("/user/"+peer,null,vault.token());vault.pin(user);JSONObject payload=new JSONObject(body.toString()).put("kind","signal");JSONObject envelope=Crypto.encrypt(vault.nick(),peer,Payload.wire(payload),java.util.UUID.randomUUID().toString(),System.currentTimeMillis(),vault.identity(),user).put("action","signal");if(!payload.optString("room").isEmpty())envelope.put("room",payload.optString("room")).put("action","signal");api.call("/send",envelope,vault.token());}catch(Exception e){if(body.optString("op").equals("call_offer")){LiveCall.Session call=LiveCall.current;if(call!=null&&call.sid.equals(body.optString("sid")))call.end(I18n.t("Собеседник сейчас недоступен"),false);}Rtc.status.put(body.optString("mid"),I18n.t("Не удалось связаться. Откройте чат на обоих телефонах."));changed(this);}});}
  void receive(){boolean checked=false;while(running){try{
    if(vault.token().isEmpty()){pause(3000);continue;}
-   if(!checked||Api.live.isEmpty()){api.check();checked=true;state=I18n.t("Подключено");changed(this);}
+   if(!checked||Api.live.isEmpty()){api.check();checked=true;state="Подключено";changed(this);}
    // Keeps a user-enabled messaging connection alive during screen-off. Doze exemption is offered in settings.
    wake.acquire(60000);
-   JSONArray a=api.call("/poll",null,vault.token()).getJSONArray("messages");if(!running)break;state=I18n.t("Подключено");
+   JSONArray a=api.call("/poll",null,vault.token()).getJSONArray("messages");if(!running)break;state="Подключено";
    for(int i=0;i<a.length();i++){
     JSONObject e=a.getJSONObject(i);String from=e.getString("from");
     try{
@@ -56,7 +56,7 @@ public class ChatService extends Service {
     catch(Exception rejected){/* Invalid or no-longer-authorized envelopes do not stop delivery of others. */}
     api.call("/ack",new JSONObject().put("from",from).put("id",e.getString("id")),vault.token());changed(this);
    }
-  }catch(Exception e){checked=false;state=e instanceof Api.Failure&&((Api.Failure)e).status==401?I18n.t("Нужно войти снова"):I18n.t("Нет подключения");changed(this);pause(3000);}finally{if(wake.isHeld())wake.release();}}
+  }catch(Exception e){checked=false;state=e instanceof Api.Failure&&((Api.Failure)e).status==401?"Нужно войти снова":"Нет подключения";changed(this);pause(3000);}finally{if(wake.isHeld())wake.release();}}
  }
  void sync()throws Exception{
   try{api.call("/capabilities",new JSONObject().put("protocol",4),vault.token());long revision=vault.roomRevision();vault.syncRooms(api.call("/rooms",null,vault.token()).getJSONArray("rooms"),revision);vault.profile(api.call("/me",null,vault.token()));vault.blocks(api.call("/blocks",null,vault.token()).getJSONArray("blocked"));deletionSync();try{JSONArray cleared=api.call("/chats/cleared",null,vault.token()).getJSONArray("items");for(int i=0;i<cleared.length();i++){JSONObject c=cleared.getJSONObject(i);vault.clearChat(c.getString("peer"),c.getLong("through_ms"));}}catch(Api.Failure e){if(e.status!=404)throw e;}cloudSync();JSONObject rooms=vault.copy().getJSONObject("rooms");java.util.Iterator<String> roomIds=rooms.keys();while(roomIds.hasNext()){String rid=roomIds.next();try{ChannelHistory.syncRoom(api,vault,rid,4);}catch(Api.Failure e){if(e.status!=403&&e.status!=404)throw e;}}}catch(Api.Failure e){if(e.status!=404)throw e;}
@@ -86,6 +86,6 @@ public class ChatService extends Service {
   }
   JSONArray messages=vault.copy().getJSONArray("messages"),ids=new JSONArray();for(int i=0;i<messages.length()&&ids.length()<100;i++){JSONObject m=messages.getJSONObject(i);if(m.optBoolean("out")&&m.optString("status").equals("stored"))ids.put(m.optString("id"));}if(ids.length()>0){JSONArray delivered=api.call("/receipts",new JSONObject().put("ids",ids),vault.token()).getJSONArray("delivered");for(int i=0;i<delivered.length();i++)vault.delivered(delivered.getString(i));}
  }
- public void onDestroy(){LiveCall.Session call=LiveCall.current;if(call!=null&&call.vault==vault)call.end(I18n.t("Звонок завершён"),false);running=false;if(incoming!=null)incoming.interrupt();if(outgoing!=null)outgoing.interrupt();if(wake!=null&&wake.isHeld())wake.release();if(callback!=null)getSystemService(ConnectivityManager.class).unregisterNetworkCallback(callback);signals.shutdownNow();if(rtc!=null)rtc.close();if(instance==this)instance=null;state=I18n.t("Нет подключения");super.onDestroy();}
+ public void onDestroy(){LiveCall.Session call=LiveCall.current;if(call!=null&&call.vault==vault)call.end(I18n.t("Звонок завершён"),false);running=false;if(incoming!=null)incoming.interrupt();if(outgoing!=null)outgoing.interrupt();if(wake!=null&&wake.isHeld())wake.release();if(callback!=null)getSystemService(ConnectivityManager.class).unregisterNetworkCallback(callback);signals.shutdownNow();if(rtc!=null)rtc.close();if(instance==this)instance=null;state="Нет подключения";super.onDestroy();}
  public IBinder onBind(Intent i){return null;}
 }
