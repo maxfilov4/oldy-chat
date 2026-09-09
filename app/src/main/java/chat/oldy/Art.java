@@ -4,7 +4,7 @@ import android.graphics.*;
 import android.view.*;
 import org.json.*;
 import java.util.concurrent.*;
-/** Original animated vector avatars and reactions; bitmap mascot generated for this project. */
+/** Original illustrated avatar atlas, animated mascot sprite atlas and vector stickers. */
 final class Art extends View {
  static Bitmap mascot,avatars;float testTime=-1;static final android.util.LruCache<String,Bitmap> photos=new android.util.LruCache<>(40);
  static final ExecutorService fetch=Executors.newFixedThreadPool(2);
@@ -30,7 +30,7 @@ final class Art extends View {
    if(photo!=null){float scale=Math.max(w/photo.getWidth(),h/photo.getHeight());float bw=photo.getWidth()*scale,bh=photo.getHeight()*scale;c.drawBitmap(photo,null,new RectF((w-bw)/2,(h-bh)/2,(w+bw)/2,(h+bh)/2),p);}
    else{c.drawColor(0xff466359);if(!requested){requested=true;fetch.execute(()->{try{Vault v=ChatService.vault(getContext());JSONObject r=new Api(getContext()).call("/avatar/"+key.substring(6),null,v.token());byte[] b=Crypto.un64(r.getString("photo"));Bitmap image=BitmapFactory.decodeByteArray(b,0,b.length);if(image!=null){photos.put(key,image);photo=image;postInvalidate();}}catch(Exception ignored){}});}}
   }else{c.scale(w/100,h/100);if(type==1)emoji(c,t);else avatar(c,t);}
-  c.restore();if(moving&&isAttachedToWindow()&&getWindowVisibility()==VISIBLE&&(!key.startsWith("photo:")))postInvalidateDelayed(50);
+  c.restore();if(moving&&isAttachedToWindow()&&getWindowVisibility()==VISIBLE&&(type!=0||avatars==null)&&(!key.startsWith("photo:")))postInvalidateDelayed(50);
  }
  void avatar(Canvas c,float t){
   int[] bg={0xffc9f3ac,0xffffd3ce,0xffcbbdfa,0xffbce8f6,0xfff4d78f,0xffb1e4ce,0xffefbfe8,0xffbccdfe,0xffecd0ba,0xff8accc0,0xffffb9c9,0xffdddba7};
