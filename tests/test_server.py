@@ -38,6 +38,14 @@ class RelayTest(unittest.TestCase):
   code,result=self.request('/login',{'nick':'alice','password':'correct horse battery'});self.assertEqual(code,200);self.assertNotEqual(result['token'],self.tokens['alice'])
   self.assertEqual(self.request('/me',token=result['token'])[1]['nick'],'alice')
   self.request('/logout',{},result['token']);self.assertEqual(self.request('/me',token=result['token'])[0],401)
+ def test_unicode_name_and_room_search(self):
+  self.assertEqual(self.request('/profile',{'name':'Старый Геймер'},self.tokens['alice'])[0],200)
+  try:
+   for query in ('СТАРЫЙ','старый'):
+    code,result=self.request('/search?q='+urllib.parse.quote(query),token=self.tokens['bobby']);self.assertEqual(code,200);self.assertIn('alice',[u['nick'] for u in result['users']])
+   code,room=self.request('/room/create',{'kind':'channel','title':'Новости Портала','handle':'unicode_'+uuid.uuid4().hex[:8],'public':True,'members':[]},self.tokens['alice']);self.assertEqual(code,200,room)
+   code,result=self.request('/search?q='+urllib.parse.quote('НОВОСТИ ПОРТАЛА'),token=self.tokens['bobby']);self.assertEqual(code,200);self.assertIn(room['id'],[r['id'] for r in result['rooms']])
+  finally:self.request('/profile',{'name':'alice'},self.tokens['alice'])
  def signed(self,e):
   signed=('oldy-v1\n'+e['id']+'\n'+e['from']+'\n'+e['to']+'\n'+str(e['time'])+'\n'+e['key']+'\n'+e['iv']+'\n'+e['body']).encode()
   e['signature']=base64.b64encode(self.signing.sign(signed,ec.ECDSA(hashes.SHA256()))).decode();return e

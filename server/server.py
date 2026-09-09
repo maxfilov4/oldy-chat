@@ -30,6 +30,7 @@ def init_db(path=None):
  global DB
  ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
  DB = sqlite3.connect(str(path or ROOT/'accounts.sqlite3'), check_same_thread=False)
+ DB.create_function('casefold',1,lambda value:str(value or '').casefold(),deterministic=True)
  DB.execute('PRAGMA journal_mode=WAL')
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
@@ -664,13 +665,13 @@ class Handler(BaseHTTPRequestHandler):
      DB.execute('UPDATE emails SET verified=1 WHERE nick=?',(nick,));DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
     return self.reply(private_account(nick))
    if path=='/search' and not post:
-    q=parse_qs(urlsplit(self.path).query).get('q',[''])[0].strip().lstrip('@').lower()[:60]
+    q=parse_qs(urlsplit(self.path).query).get('q',[''])[0].strip().lstrip('@').casefold()[:60]
     if len(q)<2:return self.reply({'users':[],'rooms':[]})
     escaped=q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_');pattern='%'+escaped+'%'
     with LOCK:
-     users=[r[0] for r in DB.execute("SELECT nick FROM users WHERE (nick LIKE ? ESCAPE '\\' OR lower(name) LIKE ? ESCAPE '\\') AND nick!=? LIMIT 20",(pattern,pattern,nick))]
+     users=[r[0] for r in DB.execute("SELECT nick FROM users WHERE (nick LIKE ? ESCAPE '\\' OR casefold(name) LIKE ? ESCAPE '\\') AND nick!=? LIMIT 20",(pattern,pattern,nick))]
      rooms=[]
-     for rid,title,kind,avatar,handle,public in DB.execute("SELECT r.id,r.title,r.kind,r.avatar,h.handle,r.public FROM rooms r JOIN handles h ON h.ref=r.id AND h.kind='room' WHERE (r.public=1 OR EXISTS(SELECT 1 FROM members m WHERE m.room=r.id AND m.nick=?)) AND (h.handle LIKE ? ESCAPE '\\' OR lower(r.title) LIKE ? ESCAPE '\\') LIMIT 20",(nick,pattern,pattern)):
+     for rid,title,kind,avatar,handle,public in DB.execute("SELECT r.id,r.title,r.kind,r.avatar,h.handle,r.public FROM rooms r JOIN handles h ON h.ref=r.id AND h.kind='room' WHERE (r.public=1 OR EXISTS(SELECT 1 FROM members m WHERE m.room=r.id AND m.nick=?)) AND (h.handle LIKE ? ESCAPE '\\' OR casefold(r.title) LIKE ? ESCAPE '\\') LIMIT 20",(nick,pattern,pattern)):
       rooms.append(dict(id=rid,title=title,kind=kind,avatar=avatar,handle=handle,public=bool(public),joined=bool(DB.execute('SELECT 1 FROM members WHERE room=? AND nick=?',(rid,nick)).fetchone())))
     return self.reply({'users':[public_user(u) for u in users],'rooms':rooms})
    if path=='/campaign' and not post:
