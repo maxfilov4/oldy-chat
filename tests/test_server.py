@@ -315,6 +315,16 @@ class RelayTest(unittest.TestCase):
   self.assertIsNone(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',('verified_new',)).fetchone())
   body['code']=self.mail[email];status,account=self.request('/register',body);self.assertEqual(status,200);self.assertTrue(account['user']['email_verified'])
   body['nick']='replay_code';self.assertEqual(self.request('/register',body)[0],400)
+ def test_nickname_checked_before_sending_signup_email(self):
+  email='nickname_gate@example.test'
+  before=set(self.mail)
+  code,response=self.request('/signup/request',{'email':email,'nick':'@BOBBY'})
+  self.assertEqual(code,409);self.assertEqual(set(self.mail),before)
+  self.assertFalse(self.request('/handles?handle=BOBBY')[1]['available'])
+  self.assertTrue(self.request('/handles?handle=unused_fresh_handle')[1]['available'])
+  code,response=self.request('/signup/request',{'email':email,'nick':'unused_fresh_handle'})
+  self.assertEqual(code,200);self.assertIn(email,self.mail)
+
  def test_signup_closed_when_mail_unavailable(self):
   original=self.mod.mail_code
   def fail(email,code):raise self.mod.Problem(503,'mail unavailable')

@@ -136,7 +136,7 @@ def collect_media():
   for (vid,) in DB.execute('SELECT id FROM media_garbage').fetchall():
    if vid in MEDIA_JOBS:continue
    try:
-    for suffix in ('.part','.mp4','.compat.mp4','.compat.part.mp4','.cover.jpg','.cover.part.jpg'):(ROOT/'videos'/(vid+suffix)).unlink(missing_ok=True)
+    for suffix in ('.part','.mp4','.compat.mp4','.compat.part.mp4','.cover.jpg','.cover.part.jpg','.cover-v2.jpg','.cover-v2.part.jpg'):(ROOT/'videos'/(vid+suffix)).unlink(missing_ok=True)
     DB.execute('DELETE FROM media_garbage WHERE id=?',(vid,))
    except OSError:pass
   DB.commit()
@@ -179,8 +179,13 @@ def store_channel_history(nick,data):
  if not isinstance(rid,str) or not isinstance(mid,str) or not re.fullmatch('[a-f0-9-]{36}',mid) or not isinstance(record['time'],int) or record['time']<1 or record['time']>time.time()*1000+300000:raise Problem(400,'Неверная публикация')
  room=room_info(rid,nick)
  if room['kind']!='channel':raise Problem(400,'Это не канал')
- fields={'kind','text','room','thread','mime','size','name','sha256','sticker','reply','link','thumb','cloud_video','round','animated','cloud_blob','blob_key','blob_iv','op','mid','emoji'}
+ fields={'kind','text','room','thread','mime','size','name','sha256','sticker','reply','link','thumb','cloud_video','round','animated','cloud_blob','blob_key','blob_iv','duration','waveform','op','mid','emoji'}
  if not isinstance(body,dict) or set(body)-fields or body.get('room')!=rid or body.get('kind') not in ('text','file','sticker','control'):raise Problem(400,'Неверное содержимое')
+ if 'duration' in body and (not isinstance(body['duration'],int) or not 0<=body['duration']<=86400000):raise Problem(400,'Неверная длительность')
+ if 'waveform' in body:
+  try:
+   if not isinstance(body['waveform'],str) or len(body['waveform'])>128 or len(base64.b64decode(body['waveform'],validate=True))>96:raise ValueError()
+  except Exception:raise Problem(400,'Неверная звуковая дорожка')
  thread=body.get('thread','');target=''
  if not isinstance(thread,str) or thread and not re.fullmatch('[a-f0-9-]{36}',thread):raise Problem(400,'Неверные комментарии')
  if gone(mid,rid,thread):raise Problem(410,'Публикация удалена')
@@ -257,19 +262,19 @@ def delete_content(nick,rid,mid,whole=False):
  return {'ok':True,'kind':'room' if whole else 'post','room':rid,'mid':mid,'media_cleanup_pending':pending}
 
 def make_video_cover(vid):
- dest=ROOT/'videos'/(vid+'.cover.jpg')
+ dest=ROOT/'videos'/(vid+'.cover-v2.jpg')
  if dest.exists():return dest
  if not shutil.which('ffmpeg'):raise Problem(503,'Обложка пока недоступна')
  if not MEDIA_GATE.acquire(blocking=False):raise Problem(409,'Готовим обложку')
- temporary=dest.with_name(vid+'.cover.part.jpg')
+ temporary=dest.with_name(vid+'.cover-v2.part.jpg')
  try:
   with LOCK:
    item=DB.execute('SELECT ready,kind FROM videos WHERE id=?',(vid,)).fetchone()
    if not item or not item[0] or item[1]=='blob':raise Problem(404,'Видео недоступно')
   for offset in ('1','0'):
-   command=['ffmpeg','-nostdin','-v','error','-threads','1','-filter_threads','1','-protocol_whitelist','file,pipe','-ss',offset,'-f','mov','-i',str(ROOT/'videos'/(vid+'.mp4')),'-t','4','-an','-vf','scale=480:480:force_original_aspect_ratio=decrease,thumbnail=30','-frames:v','1','-threads','1','-q:v','4','-y',str(temporary)]
+   command=['ffmpeg','-nostdin','-v','error','-threads','1','-filter_threads','1','-protocol_whitelist','file,pipe','-ss',offset,'-f','mov','-i',str(ROOT/'videos'/(vid+'.mp4')),'-t','4','-an','-vf','scale=1280:1280:force_original_aspect_ratio=decrease,thumbnail=12','-frames:v','1','-threads','1','-q:v','2','-y',str(temporary)]
    result=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=25)
-   if result.returncode==0 and temporary.is_file() and 0<temporary.stat().st_size<250000:break
+   if result.returncode==0 and temporary.is_file() and 0<temporary.stat().st_size<800000:break
   else:raise Problem(422,'Не удалось извлечь кадр видео')
   with LOCK:
    if not DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():raise Problem(404,'Видео удалено')
@@ -385,7 +390,12 @@ def mail_code(email,code):
  from email.message import EmailMessage
  host=os.environ.get('OLDY_SMTP_HOST','');sender=os.environ.get('OLDY_SMTP_FROM','')
  if not host or not sender:raise Problem(503,'Владелец ещё не настроил отправку писем. Регистрация откроется после подключения почты.')
- msg=EmailMessage();msg['Subject']='Код подтверждения OldЫ Chat';msg['From']=sender;msg['To']=email;msg.set_content('Код подтверждения: '+code+'\nДействует 10 минут. Никому не сообщайте этот код.')
+ from email.utils import formataddr,formatdate,make_msgid,parseaddr
+ address=parseaddr(sender)[1]
+ if not re.fullmatch(r'[^\s@]+@[^\s@]+',address):raise Problem(503,'Адрес отправителя настроен неверно')
+ msg=EmailMessage();msg['Subject']='Код подтверждения Oldy Chat';msg['From']=formataddr(('Oldy Chat',address));msg['To']=email
+ msg['Date']=formatdate(localtime=False,usegmt=True);msg['Message-ID']=make_msgid(domain=address.rsplit('@',1)[1]);msg['Auto-Submitted']='auto-generated'
+ msg.set_content('Ваш код для Oldy Chat: '+code+'\n\nКод действует 10 минут. Введите его в приложении.\nЕсли вы не запрашивали код, просто проигнорируйте это письмо.',charset='utf-8')
  try:
   port=int(os.environ.get('OLDY_SMTP_PORT','587'));tls=ssl.create_default_context()
   smtp=smtplib.SMTP_SSL(host,port,context=tls,timeout=15) if port==465 else smtplib.SMTP(host,port,timeout=15)
@@ -506,7 +516,12 @@ class Handler(BaseHTTPRequestHandler):
     with LOCK:taken=DB.execute('SELECT 1 FROM handles WHERE handle=?',(h,)).fetchone()
     return self.reply({'handle':h,'available':not bool(taken)})
    if path=='/signup/request' and post:
-    rate(('signup-ip',self.client_address[0]),10,3600);email=email_value(data.get('email',''));rate(('signup-email',email),3,3600)
+    rate(('signup-ip',self.client_address[0]),10,3600);email=email_value(data.get('email',''))
+    if 'nick' in data:
+     requested_handle=handle_value(data['nick'])
+     with LOCK:
+      if DB.execute('SELECT 1 FROM handles WHERE handle=?',(requested_handle,)).fetchone():raise Problem(409,'Этот ник уже занят. Выберите другой.')
+    rate(('signup-email',email),3,3600)
     with LOCK:
      if DB.execute('SELECT 1 FROM emails WHERE email=?',(email,)).fetchone():raise Problem(409,'Этот e-mail уже зарегистрирован. Войдите в аккаунт.')
     ticket=secrets.token_urlsafe(32);code=''.join(secrets.choice('0123456789') for _ in range(6));hashed=hashlib.sha256(ticket.encode()).hexdigest()
@@ -732,12 +747,7 @@ class Handler(BaseHTTPRequestHandler):
     if not email:raise Problem(400,'Сначала добавьте e-mail')
     code=''.join(secrets.choice('0123456789') for _ in range(6));digest=hashlib.sha256((nick+':'+code).encode()).hexdigest()
     with LOCK:DB.execute('INSERT OR REPLACE INTO email_codes VALUES(?,?,?,0)',(nick,digest,int(time.time())+600));DB.commit()
-    msg=EmailMessage();msg['Subject']='Код подтверждения OldЫ Chat';msg['From']=sender;msg['To']=email;msg.set_content('Код подтверждения: '+code+'\nДействует 10 минут. Никому не сообщайте код.')
-    try:
-     with smtplib.SMTP(host,int(os.environ.get('OLDY_SMTP_PORT','587')),timeout=15) as smtp:
-      smtp.starttls(context=ssl.create_default_context())
-      if os.environ.get('OLDY_SMTP_USER'):smtp.login(os.environ['OLDY_SMTP_USER'],os.environ.get('OLDY_SMTP_PASSWORD',''))
-      smtp.send_message(msg)
+    try:mail_code(email,code)
     except Exception:
      with LOCK:DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
      raise Problem(503,'Не удалось отправить письмо. Попробуйте позже.')

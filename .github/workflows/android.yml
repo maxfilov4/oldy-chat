@@ -67,12 +67,13 @@ jobs:
           path: |
             build/OldyChat-beta.apk
             build/Install-OldyChat.txt
-            build/OldyChat-0.4-server.tar.gz
+            build/OldyChat-0.4.1-server.tar.gz
             build/release/release.json
             build/design-results.txt
             build/video-results.txt
             build/update-results.txt
             build/capture-results.txt
+            build/refresh-results.txt
             build/channel-results.txt
             build/capture-debug.log
             build/call-results.txt

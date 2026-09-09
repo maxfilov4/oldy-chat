@@ -67,7 +67,7 @@ final class Vault {
   String id=java.util.UUID.randomUUID().toString();long now=System.currentTimeMillis();JSONObject p=new JSONObject(body.toString());
   JSONObject m=new JSONObject().put("id",id).put("peer",to).put("text",p.optString("text")).put("kind",p.optString("kind","text")).put("time",now).put("out",true).put("status","pending");
   if(local!=null)m.put("local",local);
-  for(String key:new String[]{"mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv"})if(p.has(key))m.put(key,p.get(key));
+  for(String key:new String[]{"mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform"})if(p.has(key))m.put(key,p.get(key));
   JSONObject envelopes=new JSONObject();
   if(Conversation.community(to)){
    JSONObject r=room(Conversation.room(to));if(r==null)throw new Exception("Чат недоступен");
@@ -123,7 +123,7 @@ final class Vault {
   }
   if(k.equals("sticker"))m.put("sticker",Math.max(0,Math.min(11,p.optInt("sticker"))));
   if(k.equals("control"))m.put("control",p);
-  for(String extra:new String[]{"reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv"})if(p.has(extra))m.put(extra,p.get(extra));
+  for(String extra:new String[]{"reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform"})if(p.has(extra))m.put(extra,p.get(extra));
   data.getJSONArray("messages").put(m);save();
  }
  synchronized long channelCursor(String rid)throws Exception{return bucket("channel_cursors").optLong(rid);}

@@ -197,4 +197,4 @@ echo
 echo 'OLDY CHAT: SERVER READY'
 echo 'HTTPS 443 ready; 8443 kept for existing phones.'
 openssl x509 -in /etc/oldy-chat/server.crt -noout -fingerprint -sha256
-echo 'OLDY CHAT 0.4: UPDATE COMPLETE. Install the new APK on both phones.'
+echo 'OLDY CHAT 0.4.1: UPDATE COMPLETE. Install the new APK on both phones.'

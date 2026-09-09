@@ -86,6 +86,9 @@ grep -q 'OLDY_UPDATE_PASS' build/update-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ChannelInstrumentation > build/channel-results.txt
 cat build/channel-results.txt
 grep -q 'OLDY_CHANNEL_PASS' build/channel-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.RefreshInstrumentation > build/refresh-results.txt
+cat build/refresh-results.txt
+grep -q 'OLDY_REFRESH_PASS' build/refresh-results.txt
 adb shell pm grant chat.oldy android.permission.RECORD_AUDIO
 adb shell pm grant chat.oldy android.permission.CAMERA
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt

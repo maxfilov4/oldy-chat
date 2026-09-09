@@ -8,7 +8,7 @@ import java.util.concurrent.*;
 final class Art extends View {
  static Bitmap mascot,avatars;float testTime=-1;static final android.util.LruCache<String,Bitmap> photos=new android.util.LruCache<>(40);
  static final ExecutorService fetch=Executors.newFixedThreadPool(2);
- final Paint p=new Paint(3);final String key;final int type,index;boolean requested;Bitmap photo;
+ final Paint p=new Paint(3);final String key;final int type,index;boolean requested,portrait;Bitmap photo;
  Art(Context c,String k){super(c);key=k==null?"preset:0":k;type=key.equals("mascot")?2:key.startsWith("sticker:")?1:0;int n=0;try{n=Integer.parseInt(key.substring(key.indexOf(':')+1));}catch(Exception ignored){}index=Math.max(0,Math.min(11,n));setContentDescription(type==2?"Старый геймер: гуляет, приседает и пишет":type==1?"Анимированный эмодзи":"Аватар");
   if(type==2&&mascot==null)try{BitmapFactory.Options opt=new BitmapFactory.Options();opt.inSampleSize=1;mascot=BitmapFactory.decodeStream(c.getAssets().open("mascot-v3.webp"),null,opt);}catch(Exception ignored){}
   if(type==0&&!key.startsWith("photo:")&&avatars==null)try{avatars=BitmapFactory.decodeStream(c.getAssets().open("avatars-v3.webp"));}catch(Exception ignored){}
@@ -16,7 +16,7 @@ final class Art extends View {
  void oval(Canvas c,int color,float l,float t,float r,float b){p.setColor(color);c.drawOval(l,t,r,b,p);}
  void rect(Canvas c,int color,float l,float t,float r,float b,float radius){p.setColor(color);c.drawRoundRect(l,t,r,b,radius,radius,p);}
  protected void onDraw(Canvas c){super.onDraw(c);float w=getWidth(),h=getHeight();boolean moving=Notices.prefs(getContext()).getBoolean("animations",true);float t=testTime>=0?testTime:moving?(android.os.SystemClock.uptimeMillis()%18000)/1000f:9;
-  c.save();Path clip=new Path();clip.addRoundRect(0,0,w,h,Math.min(w,h)*(type==2?.25f:.5f),Math.min(w,h)*(type==2?.25f:.5f),Path.Direction.CW);c.clipPath(clip);
+  c.save();Path clip=new Path();clip.addRoundRect(0,0,w,h,Math.min(w,h)*(portrait?.06f:type==2?.25f:.5f),Math.min(w,h)*(portrait?.06f:type==2?.25f:.5f),Path.Direction.CW);c.clipPath(clip);
   if(type==2&&mascot!=null){
    int frame=4;float left=w*.2f;boolean backwards=false;float phase=t%18;
    if(phase<8){frame=((int)(phase*7))%4;backwards=phase>=4;left=(backwards?(8-phase)/4:phase/4)*w*.4f;}
@@ -24,7 +24,7 @@ final class Art extends View {
    int sw=mascot.getWidth()/4,sh=mascot.getHeight()/2;Rect source=new Rect((frame%4)*sw,(frame/4)*sh,(frame%4+1)*sw,(frame/4+1)*sh);float width=Math.min(w*.67f,h*(float)sw/sh);float x=Math.min(left,w-width);c.save();if(backwards)c.scale(-1,1,x+width/2,h/2);c.drawBitmap(mascot,source,new RectF(x,0,x+width,h),p);c.restore();
    if(phase>=13&&phase<17){p.setColor(0xff83b8ee);p.setStrokeWidth(Math.max(1,w*.012f));p.setStyle(Paint.Style.STROKE);Path scribble=new Path();float start=w*.66f,yy=h*.35f;scribble.moveTo(start,yy);int steps=(int)((phase-13)*10)%20;for(int i=0;i<steps;i++)scribble.lineTo(start+i*w*.012f,yy+(float)Math.sin(i*2.7f)*h*.02f+(i/7)*h*.08f);c.drawPath(scribble,p);p.setStyle(Paint.Style.FILL);}
   }else if(type==0&&avatars!=null&&!key.startsWith("photo:")){
-   int cell=avatars.getWidth()/4;float[] centers={.170f,.480f,.793f};int cy=(int)(centers[index/4]*avatars.getHeight());Rect src=new Rect((index%4)*cell,cy-cell/2,(index%4+1)*cell,cy+cell/2);c.drawBitmap(avatars,src,new RectF(0,0,w,h),p);
+   int cell=avatars.getWidth()/4;float[] centers={.170f,.480f,.793f};int cy=(int)(centers[index/4]*avatars.getHeight());Rect src=new Rect((index%4)*cell,cy-cell/2,(index%4+1)*cell,cy+cell/2);float side=portrait?Math.max(w,h):w;c.drawBitmap(avatars,src,portrait?new RectF((w-side)/2,(h-side)/2,(w+side)/2,(h+side)/2):new RectF(0,0,w,h),p);
   }else if(key.startsWith("photo:")){
    if(photo==null)photo=photos.get(key);
    if(photo!=null){float scale=Math.max(w/photo.getWidth(),h/photo.getHeight());float bw=photo.getWidth()*scale,bh=photo.getHeight()*scale;c.drawBitmap(photo,null,new RectF((w-bw)/2,(h-bh)/2,(w+bw)/2,(h+bh)/2),p);}

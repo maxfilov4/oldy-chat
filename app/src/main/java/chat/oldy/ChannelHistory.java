@@ -13,7 +13,7 @@ import javax.crypto.spec.*;
  * and group envelopes retain their separate end-to-end encrypted history. */
 final class ChannelHistory {
  static final String DOMAIN="oldy-channel-v1\n";
- static final String[] FIELDS={"kind","text","mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","op","mid","emoji"};
+ static final String[] FIELDS={"kind","text","mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform","op","mid","emoji"};
  static JSONObject signed(Vault vault,JSONObject m)throws Exception{
   JSONObject source=m.optString("kind").equals("control")?m.getJSONObject("control"):m,p=new JSONObject();
   for(String k:FIELDS)if(source.has(k))p.put(k,source.get(k));

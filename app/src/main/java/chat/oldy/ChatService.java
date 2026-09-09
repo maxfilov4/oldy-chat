@@ -49,7 +49,7 @@ public class ChatService extends Service {
       if(payload.optString("op").startsWith("call_")){if(room.isEmpty()&&!vault.isBlocked(from))LiveCall.receive(this,from,payload);}else if(!vault.isBlocked(from)||!room.isEmpty())rtc.accept(from,payload);
      }else{
       boolean fresh=!vault.has(e.getString("id"));vault.receiveDecoded(e,peer,payload);JSONObject m=vault.message(e.getString("id"));
-      if(running&&fresh&&m!=null&&!m.optString("kind").equals("control")&&!visibleChat.equals(m.optString("peer")))Notices.show(this,m,peer);
+      if(running&&fresh&&m!=null&&!m.optString("kind").equals("control")&&!visibleChat.equals(m.optString("peer")))Notices.show(this,vault,m,peer);
      }
     }catch(Api.Failure f){if(f.status!=403&&f.status!=404)throw f;}
     catch(java.io.IOException io){throw io;}
