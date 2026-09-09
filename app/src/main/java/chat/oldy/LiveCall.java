@@ -53,7 +53,7 @@ final class LiveCall {
     List<PeerConnection.IceServer> ice=new ArrayList<>();JSONArray servers=config.getJSONArray("servers");
     for(int i=0;i<servers.length();i++){JSONObject server=servers.getJSONObject(i);PeerConnection.IceServer.Builder b=PeerConnection.IceServer.builder(server.getString("url"));if(server.has("username"))b.setUsername(server.getString("username")).setPassword(server.getString("credential"));ice.add(b.createIceServer());}
     PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(c).createInitializationOptions());factory=PeerConnectionFactory.builder().createPeerConnectionFactory();
-    PeerConnection.RTCConfiguration rtc=new PeerConnection.RTCConfiguration(ice);rtc.sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN;
+    PeerConnection.RTCConfiguration rtc=new PeerConnection.RTCConfiguration(ice);rtc.sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN;if(config.optBoolean("relay_only"))rtc.iceTransportsType=PeerConnection.IceTransportsType.RELAY;
     pc=factory.createPeerConnection(rtc,new PeerConnection.Observer(){
      public void onSignalingChange(PeerConnection.SignalingState s){}
      public void onIceConnectionChange(PeerConnection.IceConnectionState s){

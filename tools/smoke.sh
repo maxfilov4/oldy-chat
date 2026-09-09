@@ -4,6 +4,7 @@ mkdir -p build/screenshots
 adb install -r build/OldyChat-beta.apk
 adb logcat -c
 adb shell am start -W -n chat.oldy/.MainActivity
+adb exec-out screencap -p > build/screenshots/00-welcome.png
 sleep 3
 python3 tools/ui-dump.py build/window.xml 'Регистрация'
 python3 - <<'PY'
@@ -17,9 +18,14 @@ print('PASS: login screen rendered on Android')
 PY
 adb exec-out screencap -p > build/screenshots/01-login.png
 adb install -r build/OldyChat-tests.apk
+export OLDY_TURN_HOST=10.0.2.2 OLDY_TEST_TURN=1
+OLDY_TURN_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+export OLDY_TURN_SECRET
+turnserver -c /dev/null --listening-ip=0.0.0.0 --listening-port=3478 --realm=oldy-fixture --use-auth-secret --static-auth-secret="$OLDY_TURN_SECRET" --allow-loopback-peers --min-port=49200 --max-port=49230 --no-cli --no-tls --no-dtls --no-tcp-relay --pidfile=build/test-turn.pid --log-file=stdout > build/test-turn.log 2>&1 &
+turn_pid=$!
 python3 tests/device-server.py > build/device-server.log 2>&1 &
 server_pid=$!
-trap 'adb logcat -d -s AndroidRuntime:E MediaPlayer:E > build/android-errors.log; adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" 2>/dev/null || true' EXIT
+trap 'adb logcat -d -s AndroidRuntime:E MediaPlayer:E > build/android-errors.log; adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" "$turn_pid" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 30); do
  if [[ -f build/device-server/pin.txt ]]; then break; fi
  sleep 1
@@ -82,6 +88,9 @@ adb shell pm grant chat.oldy android.permission.CAMERA
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt
 cat build/capture-results.txt
 grep -q 'OLDY_CAPTURE_PASS' build/capture-results.txt
+timeout 200s adb shell am instrument -w chat.oldy.tests/chat.oldy.CallInstrumentation > build/call-results.txt
+cat build/call-results.txt
+grep -q 'OLDY_CALL_PASS' build/call-results.txt
 adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi
