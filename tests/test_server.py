@@ -9,6 +9,7 @@ class RelayTest(unittest.TestCase):
  def setUpClass(cls):
   cls.temp=tempfile.TemporaryDirectory();os.environ['OLDY_DATA']=cls.temp.name
   spec=importlib.util.spec_from_file_location('relay',Path(__file__).resolve().parents[1]/'server/server.py');cls.mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.mod)
+  cls.mail={};cls.mod.mail_code=lambda email,code:cls.mail.__setitem__(email,code)
   cls.mod.init_db();cls.server=cls.mod.Relay(('127.0.0.1',0),cls.mod.Handler);threading.Thread(target=cls.server.serve_forever,daemon=True).start();cls.url='http://127.0.0.1:'+str(cls.server.server_port)
   enc=rsa.generate_private_key(public_exponent=65537,key_size=3072).public_key();cls.signing=ec.generate_private_key(ec.SECP256R1());sig=cls.signing.public_key()
   cls.keys={k:base64.b64encode(v.public_bytes(Encoding.DER,PublicFormat.SubjectPublicKeyInfo)).decode() for k,v in [('enc',enc),('sig',sig)]}
@@ -19,6 +20,10 @@ class RelayTest(unittest.TestCase):
  def tearDownClass(cls):cls.server.shutdown();cls.server.server_close();cls.mod.DB.close();cls.temp.cleanup()
  @classmethod
  def request(cls,path,body=None,token=''):
+  if path=='/register' and body is not None and 'ticket' not in body:
+   body=dict(body);email=body.setdefault('email',body['nick']+'@example.test');status,challenge=cls.request('/signup/request',{'email':email})
+   if status!=200:return status,challenge
+   body.update(ticket=challenge['ticket'],code=cls.mail[email.lower()])
   req=urllib.request.Request(cls.url+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token})
   try:
    with urllib.request.urlopen(req,timeout=30) as r:return r.status,json.load(r)
@@ -136,7 +141,7 @@ class RelayTest(unittest.TestCase):
  def test_email_login_uniqueness_privacy_and_verification(self):
   body={'nick':'email_user','email':'PLAYER@Example.org','password':'correct password',**self.keys}
   code,r=self.request('/register',body);self.assertEqual(code,200);token=r['token']
-  self.assertEqual(r['user']['email'],'player@example.org');self.assertFalse(r['user']['email_verified'])
+  self.assertEqual(r['user']['email'],'player@example.org');self.assertTrue(r['user']['email_verified'])
   self.assertEqual(self.request('/login',{'nick':'PLAYER@example.org','password':'correct password'})[0],200)
   self.assertNotIn('email',self.request('/user/email_user',token=self.tokens['bobby'])[1])
   body['nick']='other_email';self.assertEqual(self.request('/register',body)[0],409)
@@ -247,5 +252,118 @@ class RelayTest(unittest.TestCase):
   e['action']='publish';self.assertEqual(self.request('/send',e,bob)[0],403)
   e['action']='pin';self.assertEqual(self.request('/send',e,bob)[0],403)
   e['action']='comment';e['thread']=str(uuid.uuid4());self.assertEqual(self.request('/send',e,bob)[0],404)
+
+
+ def test_signup_requires_one_time_email_code(self):
+  email='confirmed_new@example.test';body={'nick':'verified_new','email':email,'password':'a strong password',**self.keys,'ticket':'','code':''}
+  self.assertEqual(self.request('/register',body)[0],400)
+  status,c=self.request('/signup/request',{'email':email});self.assertEqual(status,200);body['ticket']=c['ticket'];body['code']='bad'
+  self.assertEqual(self.request('/register',body)[0],400)
+  self.assertIsNone(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',('verified_new',)).fetchone())
+  body['code']=self.mail[email];status,account=self.request('/register',body);self.assertEqual(status,200);self.assertTrue(account['user']['email_verified'])
+  body['nick']='replay_code';self.assertEqual(self.request('/register',body)[0],400)
+ def test_signup_closed_when_mail_unavailable(self):
+  original=self.mod.mail_code
+  def fail(email,code):raise self.mod.Problem(503,'mail unavailable')
+  self.mod.mail_code=fail
+  try:self.assertEqual(self.request('/signup/request',{'email':'no_mail@example.test'})[0],503)
+  finally:self.mod.mail_code=original
+  self.assertIsNone(self.mod.DB.execute('SELECT 1 FROM signup_codes WHERE email=?',('no_mail@example.test',)).fetchone())
+ def test_dm_both_participants_delete_but_outsider_cannot(self):
+  e=self.envelope();self.assertEqual(self.request('/send',e,self.tokens['alice'])[0],200)
+  body={'room':'','mid':e['id']}
+  self.assertEqual(self.request('/posts/delete',body,self.tokens['eve_test'])[0],403)
+  self.assertEqual(self.request('/posts/register',body,self.tokens['eve_test'])[0],403)
+  self.assertEqual(self.request('/posts/delete',body,self.tokens['bobby'])[0],200)
+  self.assertEqual(self.mod.DB.execute('SELECT COUNT(*) FROM archive WHERE mid=?',(e['id'],)).fetchone()[0],0)
+  self.assertEqual(self.request('/send',e,self.tokens['alice'])[0],410)
+  for n in ('alice','bobby'):
+   events=self.request('/deletions',token=self.tokens[n])[1]['items'];self.assertTrue(any(x['mid']==e['id'] for x in events))
+  self.assertFalse(any(x['mid']==e['id'] for x in self.request('/deletions',token=self.tokens['eve_test'])[1]['items']))
+ def test_group_author_rules_and_global_owner_override(self):
+  _,room=self.request('/room/create',{'title':'Permissions','kind':'group','members':['bobby']},self.tokens['alice']);e=self.envelope();e['from']='bobby';e['to']='alice';self.signed(e);e['room']=room['id'];e['action']='publish'
+  self.assertEqual(self.request('/send',e,self.tokens['bobby'])[0],200)
+  body={'room':room['id'],'mid':e['id']};self.assertEqual(self.request('/posts/delete',body,self.tokens['alice'])[0],403)
+  previous=self.mod.creator;self.mod.creator=lambda nick:nick=='eve_test'
+  try:self.assertEqual(self.request('/posts/delete',body,self.tokens['eve_test'])[0],200)
+  finally:self.mod.creator=previous
+ def cloud_fixture(self,rid,kind='blob'):
+  binary=b'ciphertext-is-not-a-valid-mp4'+os.urandom(800)
+  status,v=self.request('/videos/start',{'kind':kind,'room':rid,'recipient':'bobby' if not rid else '', 'name':'media.mp4','size':len(binary)},self.tokens['alice']);self.assertEqual(status,200)
+  request=urllib.request.Request(self.url+'/video-chunk/'+v['id'],data=binary,headers={'Authorization':'Bearer '+self.tokens['alice'],'X-Upload-Offset':'0','Content-Type':'application/octet-stream'})
+  with urllib.request.urlopen(request) as r:self.assertEqual(r.status,200)
+  self.assertEqual(self.request('/videos/finish',{'id':v['id']},self.tokens['alice'])[0],200)
+  return v,binary
+ def test_post_deletes_all_files_and_comments(self):
+  _,room=self.request('/room/create',{'title':'Storage cleanup','kind':'channel','members':['bobby']},self.tokens['alice']);rid=room['id'];v,binary=self.cloud_fixture(rid);mid=str(uuid.uuid4())
+  self.assertEqual(self.request('/posts/register',{'mid':mid,'room':rid,'video':v['id']},self.tokens['alice'])[0],200)
+  self.assertEqual(self.request('/threads',{'room':rid,'post':mid},self.tokens['alice'])[0],200)
+  comment=self.envelope();comment['from']='bobby';comment['to']='alice';self.signed(comment);comment.update(room=rid,action='comment',thread=mid);self.assertEqual(self.request('/send',comment,self.tokens['bobby'])[0],200)
+  folder=self.mod.ROOT/'videos';(folder/(v['id']+'.compat.mp4')).write_bytes(b'converted')
+  self.assertTrue((folder/(v['id']+'.mp4')).exists())
+  status,result=self.request('/posts/delete',{'room':rid,'mid':mid},self.tokens['alice']);self.assertEqual(status,200);self.assertFalse(result['media_cleanup_pending'])
+  self.assertFalse(list(folder.glob(v['id']+'*')))
+  self.assertEqual(self.request('/video-status/'+v['id'],token=self.tokens['alice'])[0],404)
+  self.assertEqual(self.request('/threads',{'room':rid,'post':mid},self.tokens['alice'])[0],410)
+  self.assertEqual(self.mod.DB.execute('SELECT COUNT(*) FROM archive WHERE mid=?',(comment['id'],)).fetchone()[0],0)
+  self.assertEqual(self.request('/posts/register',{'mid':mid,'room':rid},self.tokens['alice'])[0],410)
+ def test_room_delete_revokes_membership_releases_handle_and_media(self):
+  _,room=self.request('/room/create',{'title':'Disposable','kind':'group','handle':'disposable_room','members':['bobby']},self.tokens['alice']);rid=room['id'];v,_=self.cloud_fixture(rid)
+  self.assertEqual(self.request('/room/delete',{'room':rid},self.tokens['bobby'])[0],403)
+  self.assertEqual(self.request('/room/delete',{'room':rid},self.tokens['alice'])[0],200)
+  self.assertEqual(self.request('/room/'+rid,token=self.tokens['alice'])[0],404)
+  self.assertTrue(self.request('/handles?handle=disposable_room')[1]['available'])
+  self.assertFalse((self.mod.ROOT/'videos'/(v['id']+'.mp4')).exists())
+  self.assertEqual(self.request('/room/join',{'id':rid},self.tokens['bobby'])[0],404)
+ def test_blob_access_is_private_even_without_sender_online(self):
+  v,binary=self.cloud_fixture('')
+  for nick in ('alice','bobby'):
+   req=urllib.request.Request(self.url+'/video-stream/'+v['id'],headers={'Authorization':'Bearer '+self.tokens[nick]})
+   with urllib.request.urlopen(req) as response:self.assertEqual(response.read(),binary)
+  self.assertEqual(self.request('/video-stream/'+v['id'],token=self.tokens['eve_test'])[0],404)
+ def test_inherited_self_snapshot_not_restored_to_other_account(self):
+  e=self.envelope();self.request('/send',e,self.tokens['alice'])
+  copied=self.envelope();copied.update(id=e['id'],**{'from':'eve_test','to':'eve_test'});self.signed(copied)
+  self.assertEqual(self.request('/history/store',{'envelope':copied},self.tokens['eve_test'])[0],200)
+  history=self.request('/history',token=self.tokens['eve_test'])[1]['items'];self.assertFalse(next(x['verified_snapshot'] for x in history if x['envelope']['id']==e['id']))
+
+ def test_legacy_selfcopy_without_proven_ownership_is_not_restored(self):
+  e=self.envelope();e.update(to='alice');self.signed(e)
+  self.assertEqual(self.request('/history/store',{'envelope':e},self.tokens['alice'])[0],200)
+  items=self.request('/history',token=self.tokens['alice'])[1]['items'];self.assertFalse(items[0]['verified_snapshot'])
+
+ def test_call_configuration_authenticated_short_lived_and_blocked(self):
+  import hmac,hashlib
+  secret='test-turn-secret-that-is-never-shipped-123456'
+  old=os.environ.get('OLDY_TURN_SECRET');os.environ['OLDY_TURN_SECRET']=secret
+  try:
+   self.assertEqual(self.request('/call-config',{'peer':'bobby'})[0],401)
+   self.assertEqual(self.request('/call-config',{'peer':'alice'},self.tokens['alice'])[0],400)
+   code,result=self.request('/call-config',{'peer':'bobby'},self.tokens['alice']);self.assertEqual(code,200);self.assertTrue(result['relay'])
+   self.assertNotIn(secret,json.dumps(result));self.assertEqual(len(result['servers']),3)
+   for server in result['servers'][1:]:
+    expires,nick=server['username'].split(':');self.assertEqual(nick,'alice');self.assertTrue(time.time()+7100<int(expires)<time.time()+7300)
+    expected=base64.b64encode(hmac.new(secret.encode(),server['username'].encode(),hashlib.sha1).digest()).decode();self.assertEqual(server['credential'],expected)
+   self.assertEqual(self.request('/blocks',{'target':'bobby','blocked':True},self.tokens['alice'])[0],200)
+   self.assertEqual(self.request('/call-config',{'peer':'bobby'},self.tokens['alice'])[0],403)
+   self.assertEqual(self.request('/call-config',{'peer':'alice'},self.tokens['bobby'])[0],403)
+  finally:
+   self.request('/blocks',{'target':'bobby','blocked':False},self.tokens['alice'])
+   if old is None:os.environ.pop('OLDY_TURN_SECRET',None)
+   else:os.environ['OLDY_TURN_SECRET']=old
+ def test_media_upload_cannot_invent_a_comment_thread(self):
+  code,room=self.request('/room/create',{'kind':'channel','title':'Thread guard','handle':'media_thread_guard','members':['bobby']},self.tokens['alice']);self.assertEqual(code,200)
+  code,_=self.request('/videos/start',{'kind':'blob','name':'test.mp4','size':20,'room':room['id'],'thread':str(uuid.uuid4())},self.tokens['bobby']);self.assertEqual(code,404)
+ def test_cancel_unpublished_ready_media_but_never_published_file(self):
+  code,item=self.request('/videos/start',{'kind':'blob','name':'test.mp4','size':32,'recipient':'bobby'},self.tokens['alice']);self.assertEqual(code,200)
+  vid=item['id'];folder=self.mod.ROOT/'videos';folder.mkdir(exist_ok=True);path=folder/(vid+'.mp4');path.write_bytes(b'x'*32)
+  with self.mod.LOCK:self.mod.DB.execute('UPDATE videos SET ready=1,received=32 WHERE id=?',(vid,));self.mod.DB.commit()
+  mid=str(uuid.uuid4());self.assertEqual(self.request('/posts/register',{'mid':mid,'video':vid},self.tokens['alice'])[0],200)
+  self.assertEqual(self.request('/videos/cancel',{'id':vid},self.tokens['alice'])[0],409);self.assertTrue(path.exists())
+  self.assertEqual(self.request('/posts/delete',{'mid':mid},self.tokens['alice'])[0],200);self.assertFalse(path.exists())
+  code,item=self.request('/videos/start',{'kind':'blob','name':'unused.mp4','size':32,'recipient':'bobby'},self.tokens['alice']);self.assertEqual(code,200)
+  vid=item['id'];path=folder/(vid+'.mp4');path.write_bytes(b'y'*32)
+  with self.mod.LOCK:self.mod.DB.execute('UPDATE videos SET ready=1,received=32 WHERE id=?',(vid,));self.mod.DB.commit()
+  self.assertEqual(self.request('/videos/cancel',{'id':vid},self.tokens['alice'])[0],200);self.assertFalse(path.exists())
 
 if __name__=='__main__':unittest.main()

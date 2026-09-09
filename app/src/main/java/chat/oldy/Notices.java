@@ -12,8 +12,8 @@ final class Notices {
  static String channelId(Context c){return "messages_3_"+tone(c)+(prefs(c).getBoolean("sound",true)?"s":"q")+(prefs(c).getBoolean("vibration",true)?"v":"n");}
  static void show(Context c,JSONObject m,JSONObject user){
   if(!prefs(c).getBoolean("notifications",true))return;
-  boolean sound=prefs(c).getBoolean("sound",true),vibrate=prefs(c).getBoolean("vibration",true),preview=prefs(c).getBoolean("preview",false);
-  String ch=channelId(c);
+  boolean focus=prefs(c).getLong("focus_until",0)>System.currentTimeMillis();boolean sound=!focus&&prefs(c).getBoolean("sound",true),vibrate=!focus&&prefs(c).getBoolean("vibration",true),preview=prefs(c).getBoolean("preview",false);
+  String ch=focus?"messages_focus":channelId(c);
   NotificationManager nm=c.getSystemService(NotificationManager.class);NotificationChannel channel=new NotificationChannel(ch,"Сообщения"+(sound?" · "+TONE_NAMES[tone(c)]:" · без звука"),NotificationManager.IMPORTANCE_HIGH);
   channel.setSound(sound?Uri.parse("android.resource://"+c.getPackageName()+"/"+TONES[tone(c)]):null,new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build());if(vibrate)channel.setVibrationPattern(new long[]{0,80,70,80});channel.enableVibration(vibrate);nm.createNotificationChannel(channel);
   String peer=m.optString("peer");Intent i=new Intent(c,MainActivity.class).putExtra("chat",peer).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);

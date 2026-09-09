@@ -27,6 +27,9 @@ jobs:
         uses: android-actions/setup-android@v4
       - name: Install Android build tools
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
       - name: Server tests
         run: |
           python3 -m pip install cryptography pillow
@@ -58,10 +61,11 @@ jobs:
           path: |
             build/OldyChat-beta.apk
             build/Install-OldyChat.txt
-            build/OldyChat-0.3-server.tar.gz
+            build/OldyChat-0.4-server.tar.gz
             build/release/release.json
             build/design-results.txt
             build/video-results.txt
+            build/update-results.txt
             build/screenshots
             build/android-errors.log
             build/crypto-results.txt

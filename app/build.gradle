@@ -1,0 +1,27 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'chat.oldy'
+ testNamespace 'chat.oldy.tests'
+ compileSdk 35
+ defaultConfig {
+  applicationId 'chat.oldy'
+  minSdk 26
+  targetSdk 35
+  versionCode 5
+  versionName '0.4.0-beta'
+  testInstrumentationRunner 'chat.oldy.CryptoInstrumentation'
+  ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
+ }
+ signingConfigs {
+  beta { storeFile rootProject.file('.keys/beta.jks'); storePassword 'android'; keyAlias 'oldy-beta'; keyPassword 'android' }
+ }
+ buildTypes { release { signingConfig signingConfigs.beta; minifyEnabled false } }
+ testBuildType 'release'
+ sourceSets { androidTest { java.srcDirs = ['../tests']; java.include '**/*Instrumentation.java'; manifest.srcFile '../tests/AndroidManifest.xml'; assets.srcDirs = ['../tests/assets'] } }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+ packaging { jniLibs { useLegacyPackaging true } }
+}
+dependencies {
+ implementation 'io.github.webrtc-sdk:android:144.7559.12'
+ implementation 'androidx.media3:media3-exoplayer:1.8.0'
+}

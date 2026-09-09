@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="chat.oldy.tests">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
  <application android:label="Oldy tests"/>
  <instrumentation android:name="chat.oldy.CryptoInstrumentation" android:targetPackage="chat.oldy"/>
@@ -6,4 +6,5 @@
  <instrumentation android:name="chat.oldy.ScreenOffInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.DesignInstrumentation" android:targetPackage="chat.oldy"/>
 <instrumentation android:name="chat.oldy.VideoInstrumentation" android:targetPackage="chat.oldy" />
+ <instrumentation android:name="chat.oldy.UpdateInstrumentation" android:targetPackage="chat.oldy"/>
 </manifest>

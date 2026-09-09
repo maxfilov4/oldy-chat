@@ -1,4 +1,4 @@
-import datetime,os,subprocess,sys,importlib.util
+import json,urllib.parse,datetime,os,subprocess,sys,importlib.util
 from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes,serialization
@@ -13,4 +13,13 @@ os.environ['OLDY_DATA']=str(folder)
 spec=importlib.util.spec_from_file_location('device_relay',root/'server/server.py');relay=importlib.util.module_from_spec(spec);spec.loader.exec_module(relay)
 # Emulator fixture only. Production owner-key binding is covered by server integration tests.
 relay.creator=lambda nick:nick=='alice'
+mail={}
+relay.mail_code=lambda email,code:mail.__setitem__(email,code)
+class TestHandler(relay.Handler):
+ def do_GET(self):
+  if self.path.startswith('/test-code?'):
+   email=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('email',[''])[0]
+   return self.reply({'code':mail.get(email,'')})
+  return super().do_GET()
+relay.Handler=TestHandler
 sys.argv=[str(root/'server/server.py'),'--host','127.0.0.1','--port','8444','--cert',str(folder/'server.crt'),'--key',str(folder/'server.key')];relay.main()

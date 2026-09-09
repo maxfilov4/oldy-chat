@@ -26,7 +26,7 @@ oldy_coturn_present=0
 if dpkg-query -W -f='${Status}' coturn 2>/dev/null | grep -q 'install ok installed'; then oldy_coturn_present=1; fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y python3 python3-cryptography python3-pil openssl coturn
+apt-get install -y python3 python3-cryptography python3-pil openssl coturn ffmpeg
 # A newly installed package may start its default TURN service. Only stop it
 # if it did not exist before this installer; never replace an existing TURN setup.
 if [[ "$oldy_coturn_present" == 0 ]]; then systemctl disable --now coturn.service 2>/dev/null || true; fi
@@ -35,6 +35,7 @@ install -d -o root -g root -m 755 /opt/oldy-chat
 install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
 install -d -o root -g oldy-chat -m 750 /etc/oldy-chat
 install -o root -g root -m 644 "$oldy_src/server.py" /opt/oldy-chat/server.py
+if [[ -f "$oldy_src/configure-mail.py" ]]; then install -o root -g root -m 700 "$oldy_src/configure-mail.py" /opt/oldy-chat/configure-mail.py; fi
 if [[ ! -f /etc/oldy-chat/server.crt ]]; then
  openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 -keyout /etc/oldy-chat/server.key -out /etc/oldy-chat/server.crt -subj '/CN=5.42.102.11' -addext 'subjectAltName=IP:5.42.102.11' >/dev/null 2>&1
 fi
@@ -63,6 +64,7 @@ Group=oldy-chat
 Environment=OLDY_DATA=/var/lib/oldy-chat
 EnvironmentFile=-/etc/oldy-chat/owner.env
 EnvironmentFile=-/etc/oldy-chat/mail.env
+EnvironmentFile=-/etc/oldy-chat/turn.env
 ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key --also-443
 Restart=on-failure
 RestartSec=5
@@ -75,7 +77,7 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/oldy-chat
 LimitCORE=0
-MemoryMax=512M
+MemoryMax=768M
 TasksMax=120
 
 [Install]
@@ -97,21 +99,62 @@ systemctl daemon-reload
 systemctl enable --now oldy-chat
 systemctl restart oldy-chat
 if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then ufw allow 8443/tcp comment 'Oldy Chat'; ufw allow 443/tcp comment 'Oldy Chat HTTPS'; ufw allow 3478/udp comment 'Oldy Chat direct media'; fi
-cat > /etc/oldy-chat/stun.conf <<'STUN'
-stun-only
-no-tcp
-pidfile=/run/oldy-stun/turnserver.pid
-listening-port=3478
+# Reuse the dedicated discovery service; preserve unrelated coturn installations.
+oldy_turn_available=1
+if { ss -H -lunp '( sport = :3478 )'; ss -H -ltnp '( sport = :3478 )'; } | grep -q . && ! systemctl is-active --quiet oldy-stun; then
+ oldy_turn_available=0
+ echo 'Port 3478 belongs to another service. TURN was not enabled; existing service preserved.'
+fi
+if [[ "$oldy_turn_available" == 1 ]]; then
+ python3 - <<'PYTURN'
+import secrets,os
+from pathlib import Path
+folder=Path('/etc/oldy-chat');env=folder/'turn.env';values={}
+if env.exists():
+ for line in env.read_text().splitlines():
+  if '=' in line:
+   k,v=line.split('=',1);values[k]=v
+secret=values.get('OLDY_TURN_SECRET') or secrets.token_hex(32)
+env.write_text('OLDY_TURN_HOST=5.42.102.11\nOLDY_TURN_SECRET='+secret+'\n');env.chmod(0o600)
+config='''listening-port=3478
 listening-ip=0.0.0.0
+min-port=49160
+max-port=49220
+realm=oldy.chat
+fingerprint
+use-auth-secret
 no-tls
 no-dtls
+no-tcp-relay
 no-cli
 no-software-attribute
+no-multicast-peers
+stale-nonce=600
+user-quota=4
+total-quota=40
+max-bps=256000
+bps-capacity=5000000
+pidfile=/run/oldy-stun/turnserver.pid
 log-file=stdout
-STUN
-cat > /etc/systemd/system/oldy-stun.service <<'UNIT'
+no-stdout-log
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=224.0.0.0-255.255.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+'''
+(folder/'stun.conf').write_text(config+'static-auth-secret='+secret+'\n');(folder/'stun.conf').chmod(0o640)
+PYTURN
+ chown root:oldy-chat /etc/oldy-chat/stun.conf
+ cat > /etc/systemd/system/oldy-stun.service <<'UNIT'
 [Unit]
-Description=Oldy Chat STUN discovery (no media relay)
+Description=Oldy Chat authenticated audio relay and STUN
 After=network-online.target
 [Service]
 User=oldy-chat
@@ -127,12 +170,14 @@ MemoryMax=96M
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload
-if ss -H -lunp '( sport = :3478 )' | grep -q . && ! systemctl is-active --quiet oldy-stun; then
- echo 'UDP 3478 is used by an existing service. It was left unchanged; direct-media discovery needs review.'
-else
+ systemctl daemon-reload
  systemctl enable --now oldy-stun
  systemctl restart oldy-stun
+ if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then
+  ufw allow 3478/tcp comment 'Oldy calls'
+  ufw allow 49160:49220/udp comment 'Oldy audio relay'
+ fi
+ systemctl restart oldy-chat
 fi
 python3 - <<'PY' 
 import ssl,urllib.request,time
@@ -150,4 +195,4 @@ echo
 echo 'OLDY CHAT: SERVER READY'
 echo 'HTTPS 443 ready; 8443 kept for existing phones.'
 openssl x509 -in /etc/oldy-chat/server.crt -noout -fingerprint -sha256
-echo 'OLDY CHAT 0.3: UPDATE COMPLETE. Install the new APK on both phones.'
+echo 'OLDY CHAT 0.4: UPDATE COMPLETE. Install the new APK on both phones.'

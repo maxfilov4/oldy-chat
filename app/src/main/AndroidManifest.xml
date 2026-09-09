@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="chat.oldy" android:versionCode="4" android:versionName="0.3.0-beta">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="5" android:versionName="0.4.0-beta">
  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
  <uses-permission android:name="android.permission.INTERNET"/>
  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
@@ -7,6 +7,10 @@
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"/>
  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+ <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+ <uses-permission android:name="android.permission.CAMERA"/>
+ <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
  <uses-permission android:name="android.permission.WAKE_LOCK"/>
  <uses-permission android:name="android.permission.VIBRATE"/>
  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
@@ -15,8 +19,12 @@
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
    <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="oldy" android:host="comments"/></intent-filter>
   </activity>
+  <activity android:name=".CallActivity" android:exported="false"/>
+  <receiver android:name=".CallActionReceiver" android:exported="false"/>
   <activity android:name=".VideoActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:screenOrientation="fullSensor"/>
+  <activity android:name=".RoundReviewActivity" android:exported="false"/>
+  <activity android:name=".RoundActivity" android:exported="false" android:screenOrientation="portrait"/>
   <provider android:name=".UpdateProvider" android:authorities="chat.oldy.updates" android:exported="false" android:grantUriPermissions="true"/>
-  <service android:name=".ChatService" android:exported="false" android:foregroundServiceType="remoteMessaging"/>
+  <service android:name=".ChatService" android:exported="false" android:foregroundServiceType="remoteMessaging|microphone"/>
  </application>
 </manifest>

@@ -18,8 +18,8 @@ public class CryptoInstrumentation extends Instrumentation {
   byte[] local=Crypto.sealLocal(Crypto.bytes(plain));require(new String(Crypto.openLocal(local),"UTF-8").equals(plain),"Local vault roundtrip");local[local.length-1]^=1;rejected=false;try{Crypto.openLocal(local);}catch(Exception expected){rejected=true;}require(rejected,"Tampered vault accepted");
   String backup=Crypto.exportBackup(plain,"long backup password".toCharArray());require(Crypto.importBackup(backup,"long backup password".toCharArray()).equals(plain),"Backup roundtrip");rejected=false;try{Crypto.importBackup(backup,"incorrect password".toCharArray());}catch(Exception expected){rejected=true;}require(rejected,"Wrong backup password accepted");
   Api api=new Api(getContext());api.configure("https://10.0.2.2:8444",args.getString("pin"));
-  JSONObject a=api.call("/register",new JSONObject().put("nick","alice").put("password","correct battery staple").put("name","Алиса").put("enc",alice.getString("enc")).put("sig",alice.getString("sig")),"");
-  JSONObject b=api.call("/register",new JSONObject().put("nick","bobby").put("password","correct battery staple").put("name","Борис").put("enc",bob.getString("enc")).put("sig",bob.getString("sig")),"");
+  JSONObject a=FixturesInstrumentation.register(api,new JSONObject().put("nick","alice").put("password","correct battery staple").put("name","Алиса").put("enc",alice.getString("enc")).put("sig",alice.getString("sig")),"");
+  JSONObject b=FixturesInstrumentation.register(api,new JSONObject().put("nick","bobby").put("password","correct battery staple").put("name","Борис").put("enc",bob.getString("enc")).put("sig",bob.getString("sig")),"");
   ExecutorService pool=Executors.newFixedThreadPool(2);
   try{
    Future<JSONObject> receive=pool.submit(()->api.call("/poll",null,b.getString("token")));

@@ -1,0 +1,28 @@
+package chat.oldy;
+import android.app.*;import android.os.*;import android.content.*;import android.graphics.*;import android.view.*;import android.widget.*;import org.json.*;import java.io.*;import java.util.*;
+/** Regressions: account isolation, deletion tombstones, foreground refresh and composer visibility. */
+public class UpdateInstrumentation extends Instrumentation {
+ public void onCreate(Bundle b){start();}
+ void check(boolean b,String why)throws Exception{if(!b)throw new Exception(why);}
+ JSONObject account(Vault vault,String nick)throws Exception{return new JSONObject().put("token","fixture").put("user",Crypto.publicPart(vault.identity()).put("nick",nick).put("name",nick).put("protocol",4));}
+ boolean contains(View view,String value){if(view instanceof TextView&&((TextView)view).getText().toString().contains(value))return true;if(view instanceof ViewGroup){ViewGroup g=(ViewGroup)view;for(int i=0;i<g.getChildCount();i++)if(contains(g.getChildAt(i),value))return true;}return false;}
+ void shot(String name)throws Exception{Thread.sleep(400);Bitmap bitmap=getUiAutomation().takeScreenshot();File dir=new File(getTargetContext().getExternalFilesDir(null),"review");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){bitmap.compress(Bitmap.CompressFormat.PNG,100,out);}}
+ public void onStart(){Bundle result=new Bundle();try{
+  File folder=new File(getTargetContext().getFilesDir(),"isolation-"+UUID.randomUUID());folder.mkdirs();Context ctx=new ContextWrapper(getTargetContext()){public File getFilesDir(){return folder;}};
+  Vault one=new Vault(ctx,"one_test",true);JSONObject replyOne=account(one,"one_test");one.account(replyOne);JSONObject stranger=Crypto.publicPart(Crypto.identity()).put("nick","recipient").put("name","Recipient").put("protocol",4);one.pin(stranger);
+  String mid=one.queuePayload("recipient",new JSONObject().put("kind","text").put("text","Private account one"),null);JSONObject snapshot=one.archiveEnvelope(one.message(mid));String fingerprint=Crypto.fingerprint(one.identity());
+  Vault guest=Vault.guest(ctx);check(guest.nick().isEmpty()&&new Vault(ctx).copy().getJSONArray("messages").length()==0,"Logout exposed previous account");
+  Vault two=new Vault(ctx,"two_test",true);two.account(account(two,"two_test"));check(!fingerprint.equals(Crypto.fingerprint(two.identity())),"Registration reused another account's identity");check(two.copy().getJSONArray("messages").length()==0&&two.copy().getJSONObject("contacts").length()==0,"New account inherited contacts/messages");
+  Vault reopenedOne=new Vault(ctx,"one_test",false);check(reopenedOne.has(mid),"Switching accounts destroyed the first history");check(new Vault(ctx).nick().equals("two_test"),"Loading an account silently switched the active account");reopenedOne.account(replyOne);check(new Vault(ctx).has(mid),"First account could not be reopened");
+  String media=UUID.randomUUID().toString();try(MediaFiles.Writer writer=new MediaFiles.Writer(ctx,media)){writer.put(new byte[]{1,2,3,4});writer.finish();}reopenedOne.attachment(mid,media);reopenedOne.deletion(new JSONObject().put("kind","post").put("mid",mid).put("room",""));check(!MediaFiles.path(ctx,media).exists(),"Deleted attachment cache remained");reopenedOne.restoreSnapshot(snapshot);check(!reopenedOne.has(mid),"Deleted post resurrected from history");
+  MainActivity a=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));Thread.sleep(1800);Vault live=a.vault;JSONObject peer=live.peer("bobby");check(peer!=null,"Missing existing test peer");runOnMainSync(()->a.openChat("bobby"));
+  String incoming=UUID.randomUUID().toString();live.receiveDecoded(new JSONObject().put("id",incoming).put("from","bobby").put("to",live.nick()).put("time",System.currentTimeMillis()),peer,new JSONObject().put("kind","text").put("text","Обновилось без повторного открытия"));
+  long deadline=System.currentTimeMillis()+4000;boolean[] visible={false};while(!visible[0]&&System.currentTimeMillis()<deadline){runOnMainSync(()->visible[0]=a.content.findViewWithTag(incoming)!=null);Thread.sleep(150);}check(visible[0],"Open conversation failed to show a new message without navigation");
+  runOnMainSync(()->{a.compose.setText("Текст остаётся видимым ");a.emojis();a.fillEmojis(true);});Thread.sleep(200);Rect input=new Rect(),picker=new Rect();runOnMainSync(()->{a.compose.getGlobalVisibleRect(input);a.emojiPanel.getGlobalVisibleRect(picker);});check(!input.isEmpty()&&!picker.isEmpty()&&picker.bottom<=input.top,"Emoji picker covers the composer");
+  runOnMainSync(()->{HorizontalScrollView scroll=(HorizontalScrollView)a.emojiPanel.getChildAt(1);((ViewGroup)scroll.getChildAt(0)).getChildAt(0).performClick();});check(a.compose.getText().toString().contains(MotionEmoji.GLYPHS[0]),"Selected emoji missing from input");shot("14-emoji-composer");
+  runOnMainSync(()->{a.chats();checkUi(contains(a.root,"Меню"),"Menu label missing");a.findPeer();});shot("15-search-dark");check(contains(a.root,"Поиск людей")&&!contains(a.root,"Найти своих"),"Search retains old labels");
+  runOnMainSync(()->{Notices.prefs(a).edit().putString("theme","light").commit();a.findPeer();});shot("16-search-light");runOnMainSync(()->a.chats());
+  result.putString("stream","OLDY_UPDATE_PASS: independent account keys/files, logout isolation, deletion cache cleanup, no resurrection, live open-chat refresh, compact visible emoji composer, search/menu labels\n");finish(-1,result);
+ }catch(Throwable e){result.putString("stream","OLDY_UPDATE_FAIL: "+android.util.Log.getStackTraceString(e));finish(0,result);}}
+ void checkUi(boolean b,String why){if(!b)throw new AssertionError(why);}
+}

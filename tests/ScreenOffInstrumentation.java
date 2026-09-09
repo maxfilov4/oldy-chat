@@ -10,7 +10,7 @@ public class ScreenOffInstrumentation extends Instrumentation {
  void shell(String command)throws Exception{try(java.io.InputStream in=new ParcelFileDescriptor.AutoCloseInputStream(getUiAutomation().executeShellCommand(command))){byte[] b=new byte[1024];while(in.read(b)>=0){}}}
  public void onStart(){Bundle out=new Bundle();try{
   Api api=new Api(getTargetContext());api.configure("https://10.0.2.2:8444",args.getString("pin"));
-  JSONObject identity=Crypto.identity();JSONObject registered=api.call("/register",new JSONObject().put("nick","screen_test").put("password","only a test password").put("name","Ночной тест").put("enc",identity.getString("enc")).put("sig",identity.getString("sig")),"");
+  JSONObject identity=Crypto.identity();JSONObject registered=FixturesInstrumentation.register(api,new JSONObject().put("nick","screen_test").put("password","only a test password").put("name","Ночной тест").put("enc",identity.getString("enc")).put("sig",identity.getString("sig")),"");
   JSONObject alice=api.call("/user/alice",null,registered.getString("token"));Vault v=ChatService.vault(getTargetContext());
   getTargetContext().startActivity(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));long ready=System.currentTimeMillis()+20000;
   while((ChatService.instance==null||!ChatService.state.equals("Подключено"))&&System.currentTimeMillis()<ready)Thread.sleep(200);
