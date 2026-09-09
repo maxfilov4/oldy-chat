@@ -24,9 +24,9 @@ final class ChannelHistory {
  }
  static void accept(Vault vault,JSONObject item,JSONObject author,String rid)throws Exception{
   String raw=item.getString("record");JSONObject record=new JSONObject(raw);
-  if(record.getInt("v")!=1||!record.getString("from").equals(author.getString("nick"))||!record.getString("room").equals(rid)||!record.getJSONObject("payload").optString("room").equals(rid))throw new GeneralSecurityException("Неверный автор или канал");
+  if(record.getInt("v")!=1||!record.getString("from").equals(author.getString("nick"))||!record.getString("room").equals(rid)||!record.getJSONObject("payload").optString("room").equals(rid))throw new GeneralSecurityException(I18n.t("Неверный автор или канал"));
   Signature signature=Signature.getInstance("SHA256withECDSA");signature.initVerify(KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(Crypto.un64(author.getString("sig")))));signature.update(Crypto.bytes(DOMAIN+raw));
-  if(!signature.verify(Crypto.un64(item.getString("signature"))))throw new GeneralSecurityException("Подпись публикации не совпала");
+  if(!signature.verify(Crypto.un64(item.getString("signature"))))throw new GeneralSecurityException(I18n.t("Подпись публикации не совпала"));
   vault.channelRecord(record,author);
  }
  static boolean belongs(Vault vault,JSONObject m)throws Exception{
@@ -44,7 +44,7 @@ final class ChannelHistory {
   if(!m.optString("kind").equals("file")||!m.optString("cloud_blob").isEmpty()||!m.optString("cloud_video").isEmpty())return m;
   String local=vault.channelLegacyLocal(m);if(local.isEmpty())return m;
   byte[] plain=MediaFiles.bytes(vault.context,local);
-  if(plain.length!=m.optLong("size")||!Crypto.hex(MessageDigest.getInstance("SHA-256").digest(plain)).equalsIgnoreCase(m.optString("sha256")))throw new IOException("Проверка старого вложения не пройдена");
+  if(plain.length!=m.optLong("size")||!Crypto.hex(MessageDigest.getInstance("SHA-256").digest(plain)).equalsIgnoreCase(m.optString("sha256")))throw new IOException(I18n.t("Проверка старого вложения не пройдена"));
   byte[] aes=Crypto.random(32),iv=Crypto.random(12);Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(aes,"AES"),new GCMParameterSpec(128,iv));byte[] encrypted=cipher.doFinal(plain);Arrays.fill(plain,(byte)0);
   String vid=CloudMedia.upload(api,vault,m.getString("peer"),encrypted,"blob");
   try{vault.channelMedia(m.getString("id"),vid,Crypto.b64(aes),Crypto.b64(iv),local);return vault.message(m.getString("id"));}

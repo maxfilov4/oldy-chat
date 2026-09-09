@@ -5,7 +5,7 @@ final class MotionEmoji extends View {
  static final String[] GLYPHS={"😀","😍","😂","😎","🥳","🤯","🥰","😴","😮","😉","😡","😭"};
  static final String[] NAMES={"Привет","Любовь","Хохот","Круто","Праздник","Вау","Тепло","Сон","Удивление","Подмигни","Ярость","Слёзы"};
  final int style;final Paint paint=new Paint(3);final long birth=SystemClock.uptimeMillis();
- MotionEmoji(Context c,int n){super(c);style=Math.floorMod(n,12);setContentDescription("Живой смайл · "+NAMES[style]);}
+ MotionEmoji(Context c,int n){super(c);style=Math.floorMod(n,12);setContentDescription(I18n.t("Живой смайл · ")+I18n.t(NAMES[style]));}
  protected void onDraw(Canvas c){super.onDraw(c);draw(c,getWidth(),getHeight(),style,(SystemClock.uptimeMillis()-birth)/1000f,paint);if(isShown()&&Notices.prefs(getContext()).getBoolean("motion",true))postInvalidateDelayed(40);}
  static void draw(Canvas c,float w,float h,int style,float t,Paint p){c.save();float scale=Math.min(w,h)/100;c.translate((w-100*scale)/2,(h-100*scale)/2);c.scale(scale,scale);c.translate(50,51+(float)Math.sin(t*3+style)*3);c.rotate((float)Math.sin(t*2)*4);c.translate(-50,-50);p.setShader(new LinearGradient(20,15,80,92,style==10?new int[]{0xffffbf77,0xffff6576}:new int[]{0xffffec9c,0xffffbe43,0xffffa233},null,Shader.TileMode.CLAMP));c.drawCircle(50,50,36,p);p.setShader(null);p.setColor(0x55ffffff);c.drawOval(new RectF(27,22,51,35),p);p.setColor(0xffff9f69);c.drawOval(new RectF(23,53,38,61),p);c.drawOval(new RectF(62,53,77,61),p);p.setColor(0xff443143);p.setStrokeWidth(4);p.setStrokeCap(Paint.Cap.ROUND);
   boolean blink=t%4>3.8||style==7;float eyeH=blink?1:6;

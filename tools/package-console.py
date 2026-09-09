@@ -17,7 +17,7 @@ lock=open('/var/lock/oldy-update.lock','w')
 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 except BlockingIOError:raise SystemExit('Обновление уже выполняется в другой консоли.')
 release=META
-archive_name='OldyChat-0.4.1-server.tar.gz'
+archive_name='OldyChat-0.5.0-server.tar.gz'
 cache=pathlib.Path('/root')/archive_name
 with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
  folder=pathlib.Path(tmp);bundle=None
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
   data=cache.read_bytes()
   if hashlib.sha256(data).hexdigest()==release['bundle_sha256']:bundle=data
  if bundle is None:
-  print('Скачиваем OldЫ Chat 0.4.1…',flush=True);downloaded=folder/'release.zip'
+  print('Скачиваем OldЫ Chat 0.5.0…',flush=True);downloaded=folder/'release.zip'
   for attempt in range(3):
    digest=hashlib.sha256();length=0
    try:
@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
    if member.file_size>90000000:raise SystemExit('Неверный размер архива.')
    bundle=zipped.read(member)
  if hashlib.sha256(bundle).hexdigest()!=release['bundle_sha256']:raise SystemExit('Проверка архива не пройдена. Сервер не изменён.')
- expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','release.json'}
+ expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','release.json'}
  with tarfile.open(fileobj=io.BytesIO(bundle),mode='r:gz') as tar:
   members=tar.getmembers()
   if len(members)!=len(expected) or {m.name for m in members}!=expected or not all(m.isfile() and m.size<90000000 for m in members):raise SystemExit('Неверный состав выпуска.')
@@ -61,13 +61,13 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
      if not chunk:break
      target.write(chunk)
  manifest=json.loads((folder/'release.json').read_text());apk=folder/'OldyChat-latest.apk'
- if manifest['package']!='chat.oldy' or manifest['version_code']!=6 or manifest['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or manifest['size']!=apk.stat().st_size:raise SystemExit('Проверка APK не пройдена. Сервер не изменён.')
+ if manifest['package']!='chat.oldy' or manifest['version_code']!=7 or manifest['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or manifest['size']!=apk.stat().st_size:raise SystemExit('Проверка APK не пройдена. Сервер не изменён.')
  cached=cache.with_suffix('.download');cached.write_bytes(bundle);cached.chmod(0o600);os.replace(cached,cache)
  print('Проверка пройдена. Сохраняем копию базы и обновляем сервер…',flush=True)
  subprocess.run(['bash',str(folder/'install.sh')],check=True)
- print('Готово. Установи OldyChat-0.4.1.apk поверх текущего приложения на обоих телефонах.',flush=True)
+ print('Готово. Установи OldyChat-0.5.0.apk поверх текущего приложения на обоих телефонах.',flush=True)
  if not pathlib.Path('/etc/oldy-chat/mail.env').exists():print('Для писем с кодом выполни: python3 /opt/oldy-chat/configure-mail.py',flush=True)
 '''.replace('META',repr({k:meta[k] for k in ('url','zip_sha256','bundle_sha256')}))
 ast.parse(script)
-args.output.write_text("python3 - <<'OLDY_UPDATE_041'\n"+script+"OLDY_UPDATE_041\n")
+args.output.write_text("python3 - <<'OLDY_UPDATE_050'\n"+script+"OLDY_UPDATE_050\n")
 print(json.dumps({'file':str(args.output),'bytes':args.output.stat().st_size,'sha256':hashlib.sha256(args.output.read_bytes()).hexdigest()}))

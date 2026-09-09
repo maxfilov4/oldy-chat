@@ -39,6 +39,11 @@ jobs:
         run: |
           python3 -m pip install cryptography pillow aiortc==1.15.0
           python3 -m unittest discover -s tests -v
+      - name: Verify local audio processing
+        run: |
+          mkdir -p build/dsp
+          javac -d build/dsp app/src/main/java/chat/oldy/AudioDsp.java tests/AudioDspCheck.java
+          java -cp build/dsp chat.oldy.AudioDspCheck
       - name: Build signed APK
         run: bash tools/build-apk.sh
       - name: Enable KVM
@@ -67,13 +72,14 @@ jobs:
           path: |
             build/OldyChat-beta.apk
             build/Install-OldyChat.txt
-            build/OldyChat-0.4.1-server.tar.gz
+            build/OldyChat-0.5.0-server.tar.gz
             build/release/release.json
             build/design-results.txt
             build/video-results.txt
             build/update-results.txt
             build/capture-results.txt
             build/refresh-results.txt
+            build/experience-results.txt
             build/channel-results.txt
             build/capture-debug.log
             build/call-results.txt

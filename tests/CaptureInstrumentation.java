@@ -18,3 +18,4 @@ public class CaptureInstrumentation extends Instrumentation {
   result.putString("stream","OLDY_CAPTURE_PASS: actual MediaRecorder AAC, encrypted server upload/download, real camera frames, switch during one continuous recording, final MP4 audio/video tracks and timestamps\n");finish(-1,result);
  }catch(Throwable e){result.putString("stream","OLDY_CAPTURE_FAIL: "+android.util.Log.getStackTraceString(e));finish(0,result);}finally{if(round!=null){RoundActivity r=round;runOnMainSync(r::finish);}}}
 }
+

@@ -10,6 +10,9 @@ from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 from pathlib import Path
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from disk_storage import YandexDisk,DiskError
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives import hashes
@@ -28,12 +31,15 @@ CHANNEL_KEY = None
 MEDIA_JOBS = set()
 MEDIA_GATE = threading.BoundedSemaphore(1)
 MAX_BODY = 65536
+DISK = None
 
 def init_db(path=None):
- global DB, CHANNEL_KEY
+ global DB, CHANNEL_KEY, DISK
+ DISK=YandexDisk.configured()
  ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
  DB = sqlite3.connect(str(path or ROOT/'accounts.sqlite3'), check_same_thread=False)
  DB.create_function('casefold',1,lambda value:str(value or '').casefold(),deterministic=True)
+ DB.create_function('matches_query',2,lambda value,query:all(word in str(value or '').casefold().replace('ё','е') for word in str(query).casefold().replace('ё','е').split()),deterministic=True)
  DB.execute('PRAGMA journal_mode=WAL')
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
@@ -68,8 +74,20 @@ def init_db(path=None):
  CREATE TABLE IF NOT EXISTS signup_codes(ticket TEXT PRIMARY KEY,email TEXT NOT NULL,digest TEXT NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS media_garbage(id TEXT PRIMARY KEY);
  CREATE TABLE IF NOT EXISTS video_variants(id TEXT PRIMARY KEY,state TEXT NOT NULL,size INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS video_metadata(id TEXT PRIMARY KEY,width INTEGER NOT NULL,height INTEGER NOT NULL,duration REAL NOT NULL);
+ CREATE TABLE IF NOT EXISTS video_qualities(id TEXT NOT NULL,quality INTEGER NOT NULL,state TEXT NOT NULL,size INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(id,quality));
+ CREATE TABLE IF NOT EXISTS remote_media(name TEXT PRIMARY KEY,id TEXT NOT NULL,size INTEGER NOT NULL,state TEXT NOT NULL,sha256 TEXT NOT NULL DEFAULT '',retry_at INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS channel_history(seq INTEGER PRIMARY KEY AUTOINCREMENT,room TEXT NOT NULL,mid TEXT UNIQUE NOT NULL,thread TEXT NOT NULL,target TEXT NOT NULL,body BLOB NOT NULL);
  CREATE INDEX IF NOT EXISTS channel_history_room ON channel_history(room,seq);""")
+ DB.executescript("""CREATE TABLE IF NOT EXISTS account_numbers(number INTEGER PRIMARY KEY AUTOINCREMENT,nick TEXT UNIQUE NOT NULL,registered_at INTEGER NOT NULL DEFAULT 0);
+ INSERT INTO account_numbers(nick) SELECT nick FROM users WHERE nick NOT IN (SELECT nick FROM account_numbers) ORDER BY rowid;
+ CREATE TRIGGER IF NOT EXISTS number_new_account AFTER INSERT ON users BEGIN
+ INSERT INTO account_numbers(nick,registered_at) VALUES(NEW.nick,CAST(strftime('%s','now') AS INTEGER)); END;
+ CREATE TABLE IF NOT EXISTS login_codes(ticket TEXT PRIMARY KEY,email TEXT NOT NULL,nick TEXT NOT NULL,digest TEXT NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS pending_emails(nick TEXT PRIMARY KEY,email TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS email_login_accounts(nick TEXT PRIMARY KEY);
+ CREATE TABLE IF NOT EXISTS chat_clears(owner TEXT NOT NULL,peer TEXT NOT NULL,through_ms INTEGER NOT NULL,PRIMARY KEY(owner,peer));
+ CREATE TABLE IF NOT EXISTS hidden_messages(owner TEXT NOT NULL,mid TEXT NOT NULL,PRIMARY KEY(owner,mid));""")
  key_file=ROOT/'channel-history.key'
  if not key_file.exists():
   if DB.execute('SELECT 1 FROM channel_history LIMIT 1').fetchone():raise RuntimeError('Restore channel-history.key from the server backup')
@@ -109,6 +127,8 @@ def blocked(a,b):
 def private_account(nick):
  result=public_user(nick)
  with LOCK:r=DB.execute('SELECT email,verified FROM emails WHERE nick=?',(nick,)).fetchone()
+ with LOCK:pending=DB.execute('SELECT email FROM pending_emails WHERE nick=?',(nick,)).fetchone()
+ result['pending_email']=pending[0] if pending else ''
  result.update(email=r[0] if r else '',email_verified=bool(r and r[1]),creator_video=creator(nick),moderator=creator(nick))
  return result
 
@@ -131,13 +151,14 @@ def video_record(vid,nick,writing=False):
  return item
 
 def collect_media():
- # Durable garbage queue makes deletion recoverable after a crash or an OS file error.
+ # Remote deletion is performed outside the DB lock by the durable maintenance worker.
  with LOCK:
   for (vid,) in DB.execute('SELECT id FROM media_garbage').fetchall():
    if vid in MEDIA_JOBS:continue
    try:
-    for suffix in ('.part','.mp4','.compat.mp4','.compat.part.mp4','.cover.jpg','.cover.part.jpg','.cover-v2.jpg','.cover-v2.part.jpg'):(ROOT/'videos'/(vid+suffix)).unlink(missing_ok=True)
-    DB.execute('DELETE FROM media_garbage WHERE id=?',(vid,))
+    for file in (ROOT/'videos').glob(vid+'.*'):file.unlink(missing_ok=True)
+    for table in ('video_qualities','video_metadata'):DB.execute('DELETE FROM '+table+' WHERE id=?',(vid,))
+    if not DB.execute('SELECT 1 FROM remote_media WHERE id=?',(vid,)).fetchone():DB.execute('DELETE FROM media_garbage WHERE id=?',(vid,))
    except OSError:pass
   DB.commit()
 
@@ -282,17 +303,66 @@ def make_video_cover(vid):
   return dest
  finally:temporary.unlink(missing_ok=True);MEDIA_GATE.release()
 
-def compatible_video(vid):
- # One bounded, low-priority conversion. A delete revokes access immediately and cancels the worker.
+def original_file(vid):
+ file=ROOT/'videos'/(vid+'.mp4')
+ if file.is_file():return file
+ with LOCK:remote=DB.execute("SELECT size,sha256 FROM remote_media WHERE name=? AND state='ready'",(file.name,)).fetchone()
+ if not remote or DISK is None:raise Problem(503,'Хранилище видео временно недоступно')
+ if shutil.disk_usage(ROOT).free<remote[0]+268435456:raise Problem(507,'Для обработки недостаточно места')
+ temporary=file.with_name(vid+'.download.part');digest=hashlib.sha256()
+ try:
+  with DISK.open_range(file.name,0,remote[0]-1,remote[0]) as response,temporary.open('wb') as out:
+   left=remote[0]
+   while left:
+    with LOCK:exists=DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone()
+    if not exists:raise Problem(404,'Видео удалено')
+    chunk=response.read(min(1048576,left))
+    if not chunk:raise DiskError('Incomplete media download')
+    digest.update(chunk);out.write(chunk);left-=len(chunk)
+  if digest.hexdigest()!=remote[1]:raise DiskError('Media checksum differs')
+  with LOCK:
+   if not DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():raise Problem(404,'Видео удалено')
+   os.replace(temporary,file)
+  return file
+ finally:temporary.unlink(missing_ok=True)
+
+def probe_video(vid):
+ with LOCK:row=DB.execute('SELECT width,height,duration FROM video_metadata WHERE id=?',(vid,)).fetchone()
+ if row:return dict(zip(('width','height','duration'),row))
+ # Called while a conversion holds MEDIA_GATE, or by the single storage worker.
+ file=original_file(vid)
+ result=subprocess.run(['ffprobe','-v','error','-protocol_whitelist','file,pipe','-select_streams','v:0','-show_entries','stream=width,height,duration,sample_aspect_ratio:stream_tags=rotate:stream_side_data=rotation','-of','json',str(file)],capture_output=True,timeout=20,check=True)
+ stream=json.loads(result.stdout)['streams'][0];w=int(stream['width']);h=int(stream['height']);rotation=int(stream.get('tags',{}).get('rotate',0))
+ for side in stream.get('side_data_list',[]):rotation=int(side.get('rotation',rotation))
+ sar=stream.get('sample_aspect_ratio','1:1').split(':')
+ if len(sar)==2 and sar[0].isdigit() and sar[1].isdigit() and int(sar[1])>0:w=round(w*int(sar[0])/int(sar[1]))
+ if abs(rotation)%180==90:w,h=h,w
+ if not 1<=w<=32768 or not 1<=h<=32768:raise Problem(422,'Неверные размеры видео')
+ try:duration=max(0,float(stream.get('duration',0)))
+ except (TypeError,ValueError):duration=0
+ with LOCK:
+  if DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():DB.execute('INSERT OR REPLACE INTO video_metadata VALUES(?,?,?,?)',(vid,w,h,duration));DB.commit()
+ return dict(width=w,height=h,duration=duration)
+
+def quality_state(vid,quality):
+ with LOCK:return DB.execute('SELECT state,size FROM video_qualities WHERE id=? AND quality=?',(vid,quality)).fetchone() if quality else DB.execute('SELECT state,size FROM video_variants WHERE id=?',(vid,)).fetchone()
+def set_quality(vid,quality,state,size=0):
+ if quality:DB.execute('INSERT OR REPLACE INTO video_qualities VALUES(?,?,?,?)',(vid,quality,state,size))
+ else:DB.execute('INSERT OR REPLACE INTO video_variants VALUES(?,?,?)',(vid,state,size))
+def variant_suffix(quality):return ('.'+str(quality) if quality else '.compat')+'.mp4'
+
+def compatible_video(vid,quality=0):
+ dest=ROOT/'videos'/(vid+variant_suffix(quality).replace('.mp4','.part.mp4'))
  try:
   while not MEDIA_GATE.acquire(timeout=1):
    with LOCK:exists=DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone()
    if not exists:return
   try:
-   source=ROOT/'videos'/(vid+'.mp4');dest=ROOT/'videos'/(vid+'.compat.part.mp4')
-   args=['ffmpeg','-nostdin','-v','error','-threads','1','-filter_threads','1','-protocol_whitelist','file,pipe','-i',str(source),'-map','0:v:0','-map','0:a:0?','-vf',"scale='min(iw,if(gte(iw,ih),1920,1080))':'min(ih,if(gte(iw,ih),1080,1920))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",'-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-r','30','-threads','1','-c:a','aac','-b:a','128k','-movflags','+faststart','-y',str(dest)]
-   process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-   deadline=time.monotonic()+7200
+   source=original_file(vid);probe_video(vid);edge=quality or 1080
+   scale="scale='min(iw,if(gte(iw,ih),%d,%d))':'min(ih,if(gte(iw,ih),%d,%d))':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1"%(round(edge*16/9),edge,edge,round(edge*16/9))
+   if quality:scale="scale='if(gte(iw,ih),-2,min(iw,%d))':'if(gte(iw,ih),min(ih,%d),-2)',setsar=1"%(quality,quality)
+   args=['ffmpeg','-nostdin','-v','error','-threads','1','-filter_threads','1','-protocol_whitelist','file,pipe','-i',str(source),'-map','0:v:0','-map','0:a:0?','-vf',scale,'-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-r','30','-threads','1','-c:a','aac','-b:a','128k','-movflags','+faststart','-y',str(dest)]
+   process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);deadline=time.monotonic()+7200
    while process.poll() is None:
     with LOCK:exists=DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone()
     if not exists or time.monotonic()>deadline or shutil.disk_usage(ROOT).free<134217728:
@@ -302,17 +372,73 @@ def compatible_video(vid):
      break
     time.sleep(.5)
    with LOCK:
-    exists=DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone()
-    if exists and process.returncode==0 and dest.exists():
-     final=dest.with_name(vid+'.compat.mp4');os.replace(dest,final);DB.execute("UPDATE video_variants SET state='ready',size=? WHERE id=?",(final.stat().st_size,vid))
-    elif exists:DB.execute("UPDATE video_variants SET state='error' WHERE id=?",(vid,))
-    DB.commit()
+    if DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():
+     if process.returncode==0 and dest.exists():
+      final=dest.with_name(vid+variant_suffix(quality));os.replace(dest,final);set_quality(vid,quality,'ready',final.stat().st_size)
+     else:set_quality(vid,quality,'error')
+     DB.commit()
   finally:MEDIA_GATE.release()
  except Exception:
-  with LOCK:DB.execute("UPDATE video_variants SET state='error' WHERE id=?",(vid,));DB.commit()
+  with LOCK:
+   if DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():set_quality(vid,quality,'error');DB.commit()
  finally:
+  dest.unlink(missing_ok=True)
   with LOCK:MEDIA_JOBS.discard(vid)
   collect_media()
+
+def media_reader(vid,suffix,start,end,size):
+ file=ROOT/'videos'/(vid+suffix)
+ with LOCK:
+  try:f=file.open('rb');f.seek(start);return f
+  except FileNotFoundError:remote=DB.execute("SELECT 1 FROM remote_media WHERE name=? AND state='ready'",(file.name,)).fetchone()
+ if DISK is None or not remote:raise Problem(503,'Хранилище видео временно недоступно')
+ try:return DISK.open_range(file.name,start,end,size)
+ except DiskError:raise Problem(503,'Не удалось загрузить видео. Попробуй ещё раз')
+
+def storage_maintenance_once():
+ if DISK is None:return
+ # Finish remotely queued deletes first; local files have already been revoked.
+ with LOCK:garbage=DB.execute('SELECT m.name FROM remote_media m JOIN media_garbage g ON g.id=m.id').fetchall()
+ for (name,) in garbage:
+  try:
+   if DISK.delete(name):
+    with LOCK:DB.execute('DELETE FROM remote_media WHERE name=?',(name,));DB.commit()
+  except DiskError:pass
+ collect_media()
+ with LOCK:videos=DB.execute("SELECT id FROM videos WHERE ready=1 AND kind='creator'").fetchall()
+ for (vid,) in videos:
+  with LOCK:
+   if vid in MEDIA_JOBS:continue
+  for suffix in ('.mp4','.compat.mp4','.480.mp4','.720.mp4','.1080.mp4'):
+   file=ROOT/'videos'/(vid+suffix)
+   if not file.is_file():continue
+   with LOCK:row=DB.execute('SELECT state,retry_at FROM remote_media WHERE name=?',(file.name,)).fetchone()
+   if row and row[0]=='ready':
+    with LOCK:
+     if vid not in MEDIA_JOBS:file.unlink(missing_ok=True)
+    continue
+   if row and row[1]>time.time():continue
+   try:
+    if suffix=='.mp4':probe_video(vid);make_video_cover(vid)
+    DISK.folder_ready()
+    with LOCK:
+     if not DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():continue
+     DB.execute("INSERT OR IGNORE INTO remote_media(name,id,size,state) VALUES(?,?,?,'uploading')",(file.name,vid,file.stat().st_size));DB.commit()
+    digest=DISK.upload(file.name,file)
+    with LOCK:
+     DB.execute("UPDATE remote_media SET state='ready',sha256=?,retry_at=0 WHERE name=?",(digest,file.name));DB.commit()
+     if vid not in MEDIA_JOBS:file.unlink(missing_ok=True)
+    print('Video storage verified: '+file.name,flush=True)
+   except Exception:
+    with LOCK:DB.execute("UPDATE remote_media SET state='retry',attempts=attempts+1,retry_at=? WHERE name=?",(int(time.time())+300,file.name));DB.commit()
+    print('Video storage deferred; local copy retained: '+file.name,flush=True)
+   return # Bound each pass to one upload; streaming has its own connections.
+
+def storage_worker():
+ while True:
+  try:storage_maintenance_once()
+  except Exception:print('Video storage maintenance deferred',flush=True)
+  time.sleep(20)
 
 
 class Problem(Exception):
@@ -345,13 +471,15 @@ def public_user(nick):
  with LOCK:profile=DB.execute('SELECT avatar,bio FROM profiles WHERE nick=?',(nick,)).fetchone()
  result.update(avatar=profile[0] if profile else 'preset:0',bio=profile[1] if profile else '')
  with LOCK:cap=DB.execute('SELECT protocol FROM capabilities WHERE nick=?',(nick,)).fetchone()
+ with LOCK:number=DB.execute('SELECT number,registered_at FROM account_numbers WHERE nick=?',(nick,)).fetchone()
+ result.update(account_number=number[0] if number else 0,registered_at=number[1] if number else 0)
  result['protocol']=cap[0] if cap else 2
  return result
 def issue_session(nick):
  token=secrets.token_urlsafe(32)
  with LOCK:
   DB.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
-  DB.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),nick,int(time.time())+2592000))
+  DB.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),nick,int(time.time())+315360000))
   DB.commit()
  return token
 
@@ -425,7 +553,10 @@ class Handler(BaseHTTPRequestHandler):
   a=self.headers.get('Authorization','')
   if not a.startswith('Bearer '):raise Problem(401,'Войдите в аккаунт')
   digest=hashlib.sha256(a[7:].encode()).hexdigest()
-  with LOCK:r=DB.execute('SELECT nick FROM sessions WHERE hash=? AND expires>?',(digest,time.time())).fetchone()
+  with LOCK:
+   r=DB.execute('SELECT nick,expires FROM sessions WHERE hash=? AND expires>?',(digest,time.time())).fetchone()
+   if r and r[1]<time.time()+30000000:
+    DB.execute('UPDATE sessions SET expires=? WHERE hash=?',(int(time.time())+315360000,digest));DB.commit()
   if not r:raise Problem(401,'Сессия истекла. Войдите снова')
   return r[0]
  def do_GET(self):self.handle_request(False)
@@ -456,10 +587,11 @@ class Handler(BaseHTTPRequestHandler):
    if path.startswith('/video-stream/') and not post:
     nick=self.user();item=video_record(path[14:],nick)
     if not item['ready']:raise Problem(404,'Видео ещё загружается')
-    variant=parse_qs(urlsplit(self.path).query).get('compatible',['0'])[0]=='1'
-    file=ROOT/'videos'/(item['id']+('.compat.mp4' if variant else '.mp4'));size=item['size']
-    if variant:
-     with LOCK:v=DB.execute('SELECT state,size FROM video_variants WHERE id=?',(item['id'],)).fetchone()
+    query=parse_qs(urlsplit(self.path).query);variant=query.get('compatible',['0'])[0]=='1';q=query.get('quality',['0'])[0]
+    if q not in ('0','480','720','1080'):raise Problem(400,'Неверное качество видео')
+    quality=int(q);suffix=variant_suffix(quality) if variant or quality else '.mp4';size=item['size']
+    if variant or quality:
+     v=quality_state(item['id'],quality)
      if not v or v[0]!='ready':raise Problem(409,'Видео ещё обрабатывается')
      size=v[1]
     start=0;end=size-1;partial=False
@@ -469,10 +601,10 @@ class Handler(BaseHTTPRequestHandler):
      if not m:raise Problem(416,'Неверный диапазон')
      start=int(m[1]);end=min(size-1,int(m[2])) if m[2] else size-1;partial=True
      if start>=size or start>end:raise Problem(416,'Неверный диапазон')
-    with open(file,'rb') as f:
+    with media_reader(item['id'],suffix,start,end,size) as f:
      self.send_response(206 if partial else 200);self.send_header('Content-Type','application/octet-stream' if item['kind']=='blob' else 'video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Length',str(end-start+1))
      if partial:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
-     self.end_headers();f.seek(start);left=end-start+1
+     self.end_headers();left=end-start+1
      while left:
       with LOCK:exists=DB.execute('SELECT 1 FROM videos WHERE id=?',(item['id'],)).fetchone()
       if not exists:self.close_connection=True;break
@@ -484,7 +616,7 @@ class Handler(BaseHTTPRequestHandler):
     if self.headers.get('Transfer-Encoding'):raise Problem(400,'Unsupported request')
     try:n=int(self.headers.get('Content-Length','0'))
     except ValueError:raise Problem(400,'Invalid length')
-    if n<0 or n>(750000 if path in ('/profile','/room/update') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
+    if n<0 or n>(1600000 if path=='/videos/cover' else 750000 if path in ('/profile','/room/update') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
     try:data=json.loads(self.rfile.read(n))
     except Exception:raise Problem(400,'Некорректный JSON')
     if not isinstance(data,dict):raise Problem(400,'Некорректный запрос')
@@ -515,6 +647,29 @@ class Handler(BaseHTTPRequestHandler):
     h=handle_value(parse_qs(urlsplit(self.path).query).get('handle',[''])[0])
     with LOCK:taken=DB.execute('SELECT 1 FROM handles WHERE handle=?',(h,)).fetchone()
     return self.reply({'handle':h,'available':not bool(taken)})
+   if path=='/login/request' and post:
+    rate(('login-code-ip',self.client_address[0]),12,3600);email=email_value(data.get('email',''));rate(('login-code-email',email),5,3600)
+    ticket=secrets.token_urlsafe(32);hashed=hashlib.sha256(ticket.encode()).hexdigest()
+    with LOCK:row=DB.execute('SELECT nick FROM emails WHERE email=? AND verified=1',(email,)).fetchone()
+    if row:
+     code=''.join(secrets.choice('0123456789') for _ in range(6));mail_code(email,code)
+     with LOCK:
+      DB.execute('DELETE FROM login_codes WHERE email=? OR expires<?',(email,int(time.time())))
+      DB.execute('INSERT INTO login_codes(ticket,email,nick,digest,expires) VALUES(?,?,?,?,?)',(hashed,email,row[0],hashlib.sha256((ticket+':'+code).encode()).hexdigest(),int(time.time())+600));DB.commit()
+    # The response does not expose whether someone has an account at this address.
+    return self.reply({'ticket':ticket,'email':email,'expires_in':600})
+   if path=='/login/verify' and post:
+    rate(('login-code-verify',self.client_address[0]),30,600)
+    ticket=str(data.get('ticket',''));email=email_value(data.get('email',''));code=str(data.get('code',''));hashed=hashlib.sha256(ticket.encode()).hexdigest()
+    with LOCK:
+     proof=DB.execute('SELECT email,nick,digest,expires,attempts FROM login_codes WHERE ticket=?',(hashed,)).fetchone()
+     if not proof or proof[0]!=email or proof[3]<time.time() or proof[4]>=5:raise Problem(400,'Запросите новый код входа')
+     DB.execute('UPDATE login_codes SET attempts=attempts+1 WHERE ticket=?',(hashed,));DB.commit()
+     if not hmac.compare_digest(proof[2],hashlib.sha256((ticket+':'+code).encode()).hexdigest()):raise Problem(400,'Неверный код из письма')
+     if not DB.execute('SELECT 1 FROM emails WHERE email=? AND nick=? AND verified=1',(email,proof[1])).fetchone():raise Problem(400,'Адрес аккаунта изменился. Запросите новый код')
+     DB.execute('DELETE FROM login_codes WHERE ticket=?',(hashed,));DB.commit()
+     token=issue_session(proof[1]);user=private_account(proof[1])
+    return self.reply({'token':token,'user':user})
    if path=='/signup/request' and post:
     rate(('signup-ip',self.client_address[0]),10,3600);email=email_value(data.get('email',''))
     if 'nick' in data:
@@ -558,12 +713,15 @@ class Handler(BaseHTTPRequestHandler):
        DB.execute('INSERT INTO handles VALUES(?,?,?)',(nick,'user',nick))
        DB.execute('INSERT INTO users VALUES(?,?,?,?,?,?)',(nick,name,salt,hashed,enc,sig))
        if email:DB.execute('INSERT INTO emails(email,nick,verified) VALUES(?,?,1)',(email,nick))
+       if data.get('email_only') is True:DB.execute('INSERT OR IGNORE INTO email_login_accounts VALUES(?)',(nick,))
        DB.execute('DELETE FROM signup_codes WHERE ticket=?',(ticket_hash,))
        DB.commit()
       except sqlite3.IntegrityError:
        DB.rollback();raise Problem(409,'Этот @адрес или e-mail уже используется')
     else:
      with LOCK:r=DB.execute('SELECT salt,password FROM users WHERE nick=?',(nick,)).fetchone()
+     with LOCK:email_only=DB.execute('SELECT 1 FROM email_login_accounts WHERE nick=?',(nick,)).fetchone()
+     if email_only:raise Problem(403,'Для этого аккаунта вход только по e-mail и коду из письма')
      candidate=pw_hash(password,r[0] if r else '00'*16)
      if not r or not hmac.compare_digest(candidate,r[1]):raise Problem(401,'Неверный ник или пароль')
     return self.reply({'token':issue_session(nick),'user':private_account(nick)})
@@ -581,6 +739,24 @@ class Handler(BaseHTTPRequestHandler):
      credential=base64.b64encode(hmac.new(secret.encode(),username.encode(),hashlib.sha1).digest()).decode()
      servers += [{'url':'turn:'+host+':3478?transport='+transport,'username':username,'credential':credential} for transport in ('udp','tcp')]
     return self.reply({'servers':servers,'relay':len(servers)>1,'expires_in':7200 if secret else 0})
+   if path=='/videos/cover' and post:
+    item=video_record(str(data.get('id','')),nick,True);vid=item['id']
+    if item['kind']!='creator':raise Problem(400,'Обложка доступна для видео канала')
+    rate(('video-cover',nick),20,3600)
+    from PIL import Image,ImageOps
+    raw=data.get('photo','')
+    try:
+     if not isinstance(raw,str) or len(raw)>1500000:raise ValueError()
+     image=Image.open(io.BytesIO(base64.b64decode(raw,validate=True)))
+     if not 1<=image.width*image.height<=16000000:raise ValueError()
+     image=ImageOps.exif_transpose(image).convert('RGB');image.thumbnail((1440,1440))
+     out=io.BytesIO();image.save(out,format='JPEG',quality=90);clean=out.getvalue()
+    except Exception:raise Problem(400,'Выбери обычное изображение для обложки')
+    with LOCK:
+     video_record(vid,nick,True)
+     if DB.execute('SELECT 1 FROM posts WHERE video=?',(vid,)).fetchone():raise Problem(409,'Обложку выбирают перед публикацией')
+     temporary=ROOT/'videos'/(vid+'.cover-v2.part.jpg');temporary.write_bytes(clean);os.replace(temporary,ROOT/'videos'/(vid+'.cover-v2.jpg'))
+    return self.reply({'ok':True,'width':image.width,'height':image.height})
    if path.startswith('/video-cover/') and not post:
     item=video_record(path[13:],nick)
     if not item['ready'] or item['kind']=='blob':raise Problem(404,'Видео недоступно')
@@ -609,21 +785,35 @@ class Handler(BaseHTTPRequestHandler):
     vid=str(uuid.uuid4())
     with LOCK:DB.execute('INSERT INTO videos(id,owner,room,name,size,kind,recipient) VALUES(?,?,?,?,?,?,?)',(vid,nick,rid,name,size,kind,recipient));DB.commit()
     return self.reply({'id':vid,'received':0,'size':size})
-   if path=='/videos/compatible' and post:
-    item=video_record(str(data.get('id','')),nick);vid=item['id']
+   if path=='/videos/qualities' and not post:
+    vid=parse_qs(urlsplit(self.path).query).get('id',[''])[0];item=video_record(vid,nick)
+    if not item['ready'] or item['kind']=='blob':raise Problem(404,'Видео недоступно')
+    try:meta=probe_video(vid)
+    except Exception:return self.reply({'items':[],'original':True})
+    items=[]
+    for height in (480,720,1080):
+     if height>min(meta['width'],meta['height']):continue
+     row=quality_state(vid,height);items.append({'quality':height,'state':row[0] if row else 'available'})
+    return self.reply({'items':items,'original':True,**meta})
+   if path in ('/videos/compatible','/videos/quality') and post:
+    item=video_record(str(data.get('id','')),nick);vid=item['id'];quality=data.get('quality',0) if path=='/videos/quality' else 0
+    if type(quality) is not int or quality not in ((480,720,1080) if path=='/videos/quality' else (0,)):raise Problem(400,'Неверное качество видео')
     if not item['ready']:raise Problem(409,'Дождитесь загрузки')
     if item['kind']=='blob':raise Problem(400,'Это зашифрованное вложение')
+    if quality:
+     meta=probe_video(vid)
+     if quality>min(meta['width'],meta['height']):raise Problem(400,'Исходное видео меньше выбранного качества')
     with LOCK:
-     variant=DB.execute('SELECT state,size FROM video_variants WHERE id=?',(vid,)).fetchone()
+     variant=quality_state(vid,quality)
      if variant and variant[0]=='ready':return self.reply({'state':'ready','size':variant[1]})
-     if vid not in MEDIA_JOBS:
-      if variant and variant[0]=='error' and not data.get('retry'):return self.reply({'state':'error'})
-      if len(MEDIA_JOBS)>=3:raise Problem(429,'Обрабатываются другие видео. Повторите позже.')
-      if shutil.which('ffmpeg') is None:raise Problem(503,'Для обработки обновите сервер')
-      rate(('convert',nick),6,3600)
-      if shutil.disk_usage(ROOT).free<item['size']+268435456:raise Problem(507,'Для обработки недостаточно места')
-      DB.execute("INSERT OR REPLACE INTO video_variants(id,state) VALUES(?,'processing')",(vid,));DB.commit();MEDIA_JOBS.add(vid)
-      threading.Thread(target=compatible_video,args=(vid,),daemon=True).start()
+     if vid in MEDIA_JOBS:return self.reply({'state':'processing' if variant and variant[0]=='processing' else 'busy'})
+     if variant and variant[0]=='error' and not data.get('retry'):return self.reply({'state':'error'})
+     if len(MEDIA_JOBS)>=3:raise Problem(429,'Обрабатываются другие видео. Повторите позже.')
+     if shutil.which('ffmpeg') is None:raise Problem(503,'Для обработки обновите сервер')
+     rate(('convert',nick),12,3600)
+     if shutil.disk_usage(ROOT).free<item['size']+268435456:raise Problem(507,'Для обработки недостаточно места')
+     set_quality(vid,quality,'processing');DB.commit();MEDIA_JOBS.add(vid)
+     threading.Thread(target=compatible_video,args=(vid,quality),daemon=True).start()
     return self.reply({'state':'processing'})
    if path=='/posts/register' and post:
     with LOCK:mid=register_post(nick,data);DB.commit()
@@ -666,6 +856,22 @@ class Handler(BaseHTTPRequestHandler):
        if not any(json.loads(r[0]).get('room')==rid and json.loads(r[0]).get('action','publish')=='publish' for r in rows):raise Problem(404,'Пост пока не синхронизирован')
       DB.execute('INSERT OR IGNORE INTO threads VALUES(?,?)',(rid,post_id));DB.commit()
     return self.reply({'room':rid,'post':post_id,'link':'oldy://comments/'+rid+'/'+post_id})
+   if path=='/chats/cleared' and not post:
+    with LOCK:rows=DB.execute('SELECT peer,through_ms FROM chat_clears WHERE owner=?',(nick,)).fetchall()
+    return self.reply({'items':[dict(peer=r[0],through_ms=r[1]) for r in rows]})
+   if path=='/chats/clear' and post:
+    peer=handle_value(data.get('peer',''));public_user(peer);rate(('chat-clear',nick),20,60)
+    mids=data.get('mids',[])
+    if not isinstance(mids,list) or len(mids)>1200 or any(not isinstance(mid,str) or not re.fullmatch('[a-f0-9-]{36}',mid) for mid in mids):raise Problem(400,'Неверный список сообщений')
+    now=int(time.time()*1000)
+    with LOCK:
+     selected=set(mids)
+     for owner,sender,mid,raw in DB.execute('SELECT owner,sender,mid,envelope FROM archive WHERE (owner=? AND sender=?) OR (owner=? AND sender=?)',(nick,peer,peer,nick)).fetchall():
+      if not json.loads(raw).get('room'):selected.add(mid)
+     for mid in selected:
+      DB.execute('INSERT OR IGNORE INTO hidden_messages VALUES(?,?)',(nick,mid));DB.execute('DELETE FROM archive WHERE owner=? AND mid=?',(nick,mid))
+     DB.execute('INSERT INTO chat_clears VALUES(?,?,?) ON CONFLICT(owner,peer) DO UPDATE SET through_ms=excluded.through_ms',(nick,peer,now));DB.commit()
+    return self.reply({'peer':peer,'through_ms':now})
    if path=='/key-backup' and not post:
     with LOCK:r=DB.execute('SELECT blob FROM key_backups WHERE nick=?',(nick,)).fetchone()
     if not r:raise Problem(404,'Резервная копия ключей пока не настроена. Нужна копия с прежнего телефона.')
@@ -697,6 +903,7 @@ class Handler(BaseHTTPRequestHandler):
      except Exception:raise Problem(400,'Неверный конверт')
     verify_envelope(e,nick)
     with LOCK:
+     if DB.execute('SELECT 1 FROM hidden_messages WHERE owner=? AND mid=?',(nick,e['id'])).fetchone():return self.reply({'stored':True})
      if gone(e['id']):raise Problem(410,'Публикация удалена')
      DB.execute('INSERT OR IGNORE INTO archive(owner,sender,mid,envelope,delivered,selfcopy) VALUES(?,?,?,?,1,1)',(nick,nick,e['id'],json.dumps(e,separators=(',',':'))));DB.commit()
     return self.reply({'stored':True})
@@ -729,46 +936,60 @@ class Handler(BaseHTTPRequestHandler):
      else:DB.execute('DELETE FROM blocks WHERE owner=? AND target=?',(nick,target))
      DB.commit();COND.notify_all()
     return self.reply({'ok':True})
+   if path=='/account/email-only' and post:
+    with LOCK:
+     if not DB.execute('SELECT 1 FROM emails WHERE nick=? AND verified=1',(nick,)).fetchone():raise Problem(400,'Сначала подтвердите e-mail')
+     DB.execute('INSERT OR IGNORE INTO email_login_accounts VALUES(?)',(nick,));DB.commit()
+    return self.reply({'ok':True})
    if path=='/email/link' and post:
     email=email_value(data.get('email',''));rate(('email-link',nick),5,3600)
     with LOCK:
-     try:
-      DB.execute('INSERT INTO emails(email,nick) VALUES(?,?) ON CONFLICT(nick) DO UPDATE SET email=excluded.email,verified=0',(email,nick))
-      DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
-     except sqlite3.IntegrityError:DB.rollback();raise Problem(409,'Этот e-mail уже используется')
-    return self.reply(private_account(nick))
+     taken=DB.execute('SELECT nick FROM emails WHERE email=?',(email,)).fetchone()
+     if taken and taken[0]!=nick:raise Problem(409,'Этот e-mail уже используется')
+     current=DB.execute('SELECT email,verified FROM emails WHERE nick=?',(nick,)).fetchone()
+     if current and current[0]==email and current[1]:return self.reply(private_account(nick))
+     DB.execute('INSERT INTO pending_emails VALUES(?,?) ON CONFLICT(nick) DO UPDATE SET email=excluded.email',(nick,email))
+     DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
+    result=private_account(nick);result['pending_email']=email
+    return self.reply(result)
    if path=='/email/request' and post:
-    rate(('email-request',nick),3,3600)
-    import smtplib,ssl
-    from email.message import EmailMessage
-    host=os.environ.get('OLDY_SMTP_HOST','');sender=os.environ.get('OLDY_SMTP_FROM','')
-    if not host or not sender:raise Problem(503,'Почта добавлена. Отправка кодов ещё не подключена владельцем сервера.')
-    email=private_account(nick)['email']
+    rate(('email-request',nick),5,3600)
+    with LOCK:
+     pending=DB.execute('SELECT email FROM pending_emails WHERE nick=?',(nick,)).fetchone()
+     email=pending[0] if pending else private_account(nick)['email']
     if not email:raise Problem(400,'Сначала добавьте e-mail')
-    code=''.join(secrets.choice('0123456789') for _ in range(6));digest=hashlib.sha256((nick+':'+code).encode()).hexdigest()
-    with LOCK:DB.execute('INSERT OR REPLACE INTO email_codes VALUES(?,?,?,0)',(nick,digest,int(time.time())+600));DB.commit()
-    try:mail_code(email,code)
-    except Exception:
-     with LOCK:DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
-     raise Problem(503,'Не удалось отправить письмо. Попробуйте позже.')
-    return self.reply({'ok':True})
+    code=''.join(secrets.choice('0123456789') for _ in range(6));digest=hashlib.sha256((nick+':'+email+':'+code).encode()).hexdigest()
+    mail_code(email,code)
+    with LOCK:
+     now_pending=DB.execute('SELECT email FROM pending_emails WHERE nick=?',(nick,)).fetchone()
+     now_email=now_pending[0] if now_pending else private_account(nick)['email']
+     if now_email!=email:raise Problem(409,'Адрес изменился. Запросите код ещё раз')
+     DB.execute('INSERT OR REPLACE INTO email_codes VALUES(?,?,?,0)',(nick,digest,int(time.time())+600));DB.commit()
+    return self.reply({'ok':True,'email':email})
    if path=='/email/verify' and post:
     rate(('email-verify',nick),10,600);code=str(data.get('code',''))
     with LOCK:
+     pending=DB.execute('SELECT email FROM pending_emails WHERE nick=?',(nick,)).fetchone()
+     email=pending[0] if pending else private_account(nick)['email']
      r=DB.execute('SELECT digest,expires,attempts FROM email_codes WHERE nick=?',(nick,)).fetchone()
      if not r or r[1]<time.time() or r[2]>=5:raise Problem(400,'Запросите новый код')
      DB.execute('UPDATE email_codes SET attempts=attempts+1 WHERE nick=?',(nick,));DB.commit()
-     if not hmac.compare_digest(r[0],hashlib.sha256((nick+':'+code).encode()).hexdigest()):raise Problem(400,'Неверный код')
-     DB.execute('UPDATE emails SET verified=1 WHERE nick=?',(nick,));DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.commit()
+     if not hmac.compare_digest(r[0],hashlib.sha256((nick+':'+email+':'+code).encode()).hexdigest()):raise Problem(400,'Неверный код')
+     try:
+      DB.execute('INSERT INTO emails(email,nick,verified) VALUES(?,?,1) ON CONFLICT(nick) DO UPDATE SET email=excluded.email,verified=1',(email,nick))
+      DB.execute('DELETE FROM pending_emails WHERE nick=?',(nick,));DB.execute('DELETE FROM email_codes WHERE nick=?',(nick,));DB.execute('DELETE FROM login_codes WHERE nick=?',(nick,))
+      DB.execute('INSERT OR IGNORE INTO email_login_accounts VALUES(?)',(nick,));DB.commit()
+     except sqlite3.IntegrityError:DB.rollback();raise Problem(409,'Этот e-mail уже привязан к другому аккаунту')
     return self.reply(private_account(nick))
    if path=='/search' and not post:
     q=parse_qs(urlsplit(self.path).query).get('q',[''])[0].strip().lstrip('@').casefold()[:60]
-    if len(q)<2:return self.reply({'users':[],'rooms':[]})
+    if not q:return self.reply({'users':[],'rooms':[]})
+    rate(('search',nick),180,60)
     escaped=q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_');pattern='%'+escaped+'%'
     with LOCK:
-     users=[r[0] for r in DB.execute("SELECT nick FROM users WHERE (nick LIKE ? ESCAPE '\\' OR casefold(name) LIKE ? ESCAPE '\\') AND nick!=? LIMIT 20",(pattern,pattern,nick))]
+     users=[r[0] for r in DB.execute("SELECT nick FROM users WHERE (nick LIKE ? ESCAPE '\\' OR matches_query(name,?)) AND nick!=? LIMIT 20",(pattern,q,nick))]
      rooms=[]
-     for rid,title,kind,avatar,handle,public in DB.execute("SELECT r.id,r.title,r.kind,r.avatar,h.handle,r.public FROM rooms r JOIN handles h ON h.ref=r.id AND h.kind='room' WHERE (r.public=1 OR EXISTS(SELECT 1 FROM members m WHERE m.room=r.id AND m.nick=?)) AND (h.handle LIKE ? ESCAPE '\\' OR casefold(r.title) LIKE ? ESCAPE '\\') LIMIT 20",(nick,pattern,pattern)):
+     for rid,title,kind,avatar,handle,public in DB.execute("SELECT r.id,r.title,r.kind,r.avatar,h.handle,r.public FROM rooms r JOIN handles h ON h.ref=r.id AND h.kind='room' WHERE (r.public=1 OR EXISTS(SELECT 1 FROM members m WHERE m.room=r.id AND m.nick=?)) AND (h.handle LIKE ? ESCAPE '\\' OR matches_query(r.title,?)) AND NOT EXISTS(SELECT 1 FROM room_bans ban WHERE ban.room=r.id AND ban.nick=?) LIMIT 30",(nick,pattern,q,nick)):
       rooms.append(dict(id=rid,title=title,kind=kind,avatar=avatar,handle=handle,public=bool(public),joined=bool(DB.execute('SELECT 1 FROM members WHERE room=? AND nick=?',(rid,nick)).fetchone())))
     return self.reply({'users':[public_user(u) for u in users],'rooms':rooms})
    if path=='/campaign' and not post:
@@ -1010,6 +1231,7 @@ def main():
  if a.test_http and a.host not in ('127.0.0.1','::1'):p.error('Test HTTP is localhost-only')
  if not a.test_http and not(a.cert and a.key):p.error('TLS certificate and key required')
  init_db();srv=Relay((a.host,a.port),Handler)
+ if DISK is not None:threading.Thread(target=storage_worker,daemon=True).start()
  if not a.test_http:
   tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2;tls.load_cert_chain(a.cert,a.key);srv.tls=tls
  if a.also_443:

@@ -77,6 +77,94 @@ class RelayTest(unittest.TestCase):
   body={'nick':'no_email_signup','password':'correct strong password',**self.keys,'ticket':'','code':''}
   self.assertEqual(self.request('/register',body)[0],400)
   self.assertIsNone(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',('no_email_signup',)).fetchone())
+ def test_email_code_login_attempt_limit_replay_and_stable_number(self):
+  name='otp_'+uuid.uuid4().hex[:10];email=name+'@example.test'
+  status,account=self.request('/register',{'nick':name,'email':email,'name':'OTP','password':'backup password 123','email_only':True,**self.keys});self.assertEqual(status,200);number=account['user']['account_number']
+  self.assertEqual(self.request('/login',{'nick':name,'password':'backup password 123'})[0],403)
+  status,challenge=self.request('/login/request',{'email':email});self.assertEqual(status,200);actual=self.mail[email]
+  wrong='000000' if actual!='000000' else '111111';proof=dict(email=email,ticket=challenge['ticket'],code=wrong)
+  for _ in range(5):self.assertEqual(self.request('/login/verify',proof)[0],400)
+  proof['code']=actual;self.assertEqual(self.request('/login/verify',proof)[0],400)
+  _,challenge=self.request('/login/request',{'email':email});proof.update(ticket=challenge['ticket'],code=self.mail[email]);status,login=self.request('/login/verify',proof);self.assertEqual(status,200,login);self.assertEqual(login['user']['account_number'],number)
+  self.assertEqual(login['user']['sig'],account['user']['sig']);self.assertEqual(self.request('/login/verify',proof)[0],400)
+  unknown='missing_'+uuid.uuid4().hex[:8]+'@example.test';status,unknown_reply=self.request('/login/request',{'email':unknown});self.assertEqual(status,200);self.assertEqual(set(unknown_reply),set(challenge));self.assertNotIn(unknown,self.mail)
+  with self.mod.LOCK:
+   expires=self.mod.DB.execute('SELECT expires FROM sessions WHERE nick=? ORDER BY expires DESC',(name,)).fetchone()[0]
+  self.assertGreater(expires-time.time(),365*86400)
+ def test_link_email_is_atomic_preserves_number_and_revokes_old_codes(self):
+  name='link_'+uuid.uuid4().hex[:10];old=name+'@example.test';new=name+'@new.example.test'
+  _,account=self.request('/register',{'nick':name,'email':old,'password':'backup password 123',**self.keys});token=account['token'];number=account['user']['account_number']
+  _,old_challenge=self.request('/login/request',{'email':old});old_code=self.mail[old]
+  status,pending=self.request('/email/link',{'email':new},token);self.assertEqual(status,200);self.assertEqual(pending['email'],old);self.assertTrue(pending['email_verified']);self.assertEqual(pending['pending_email'],new)
+  self.assertEqual(self.request('/email/request',{},token)[0],200);code=self.mail[new]
+  status,verified=self.request('/email/verify',{'code':code},token);self.assertEqual(status,200);self.assertEqual(verified['email'],new);self.assertEqual(verified['account_number'],number);self.assertEqual(verified['sig'],account['user']['sig'])
+  self.assertEqual(self.request('/login/verify',dict(email=old,ticket=old_challenge['ticket'],code=old_code))[0],400)
+  _,challenge=self.request('/login/request',{'email':new});self.assertEqual(self.request('/login/verify',dict(email=new,ticket=challenge['ticket'],code=self.mail[new]))[0],200)
+ def test_registration_numbers_concurrent_and_restart(self):
+  initial=self.mod.DB.execute('SELECT MAX(number) FROM account_numbers').fetchone()[0]
+  def register(i):
+   name='number_'+uuid.uuid4().hex[:10]
+   return self.request('/register',{'nick':name,'password':'backup password 123',**self.keys})
+  with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:results=list(pool.map(register,range(3)))
+  self.assertTrue(all(status==200 for status,_ in results),results);numbers=sorted(r['user']['account_number'] for _,r in results);self.assertEqual(numbers,list(range(initial+1,initial+4)))
+  with self.mod.LOCK:
+   before=self.mod.DB.execute('SELECT * FROM account_numbers ORDER BY number').fetchall();self.mod.DB.close();self.mod.init_db();after=self.mod.DB.execute('SELECT * FROM account_numbers ORDER BY number').fetchall();self.assertEqual(before,after)
+  status,last=register(4);self.assertEqual(status,200);self.assertEqual(last['user']['account_number'],initial+4)
+ def test_live_directory_matches_public_nonjoined_title_words(self):
+  title='Старый Геймер обзоры портатива Ёж';handle='discover_'+uuid.uuid4().hex[:7]
+  _,room=self.request('/room/create',{'kind':'channel','title':title,'handle':handle,'public':True,'members':[]},self.tokens['alice'])
+  for q in ('с','СТАРЫЙ геймер','портатива старый','еж','@'+handle):
+   status,result=self.request('/search?q='+urllib.parse.quote(q),token=self.tokens['bobby']);self.assertEqual(status,200);self.assertIn(room['id'],[r['id'] for r in result['rooms']])
+  self.assertFalse(next(r for r in result['rooms'] if r['id']==room['id'])['joined'])
+  self.request('/room/update',{'id':room['id'],'public':False},self.tokens['alice']);result=self.request('/search?q='+handle,token=self.tokens['bobby'])[1];self.assertNotIn(room['id'],[r['id'] for r in result['rooms']])
+ def test_delete_direct_chat_is_per_account_and_does_not_resurrect(self):
+  e=self.envelope();self.assertEqual(self.request('/send',e,self.tokens['alice'])[0],200)
+  # Sender keeps its own encrypted copy; recipient must keep theirs when sender clears.
+  copy=dict(e);copy['to']='alice';copy['from']='alice';self.signed(copy);self.assertEqual(self.request('/history/store',{'envelope':copy},self.tokens['alice'])[0],200)
+  status,result=self.request('/chats/clear',{'peer':'bobby','mids':[e['id']]},self.tokens['alice']);self.assertEqual(status,200,result)
+  self.assertEqual(self.request('/history',token=self.tokens['alice'])[1]['items'],[])
+  self.assertIn(e['id'],[r['envelope']['id'] for r in self.request('/history',token=self.tokens['bobby'])[1]['items']])
+  self.assertEqual(self.request('/history/store',{'envelope':copy},self.tokens['alice'])[0],200);self.assertEqual(self.request('/history',token=self.tokens['alice'])[1]['items'],[])
+  self.assertEqual(self.request('/user/bobby',token=self.tokens['alice'])[0],200)
+  self.assertIn('bobby',[r['peer'] for r in self.request('/chats/cleared',token=self.tokens['alice'])[1]['items']]);self.assertEqual(self.request('/chats/cleared',token=self.tokens['bobby'])[1]['items'],[])
+ def test_custom_cover_ownership_pixels_and_natural_aspect(self):
+  import io
+  from PIL import Image
+  owner=self.tokens['alice'];viewer=self.tokens['bobby'];vid=str(uuid.uuid4());_,room=self.request('/room/create',{'kind':'channel','title':'Cover','members':['bobby']},owner)
+  with self.mod.LOCK:self.mod.DB.execute('INSERT INTO videos(id,owner,room,name,size,received,ready) VALUES(?,?,?,?,?,?,?)',(vid,'alice',room['id'],'cover.mp4',20,20,1));self.mod.DB.commit()
+  folder=self.mod.ROOT/'videos';folder.mkdir(exist_ok=True);(folder/(vid+'.mp4')).write_bytes(b'original video bytes');raw=io.BytesIO();Image.new('RGB',(1600,900),(239,23,85)).save(raw,format='PNG');body={'id':vid,'photo':base64.b64encode(raw.getvalue()).decode()}
+  self.assertEqual(self.request('/videos/cover',body,viewer)[0],403);status,result=self.request('/videos/cover',body,owner);self.assertEqual(status,200,result);self.assertAlmostEqual(result['width']/result['height'],16/9)
+  _,cover=self.request('/video-cover/'+vid,token=viewer);pic=Image.open(io.BytesIO(base64.b64decode(cover['photo'])));pixel=pic.getpixel((20,20));self.assertLess(sum(abs(a-b) for a,b in zip(pixel,(239,23,85))),12)
+  mid=str(uuid.uuid4());self.assertEqual(self.request('/posts/register',{'mid':mid,'room':room['id'],'video':vid},owner)[0],200);self.assertEqual(self.request('/videos/cover',body,owner)[0],409)
+ def test_disk_offload_verified_range_retry_and_channel_delete(self):
+  import io,hashlib
+  mod=self.mod;vid=str(uuid.uuid4());owner=self.tokens['alice'];_,room=self.request('/room/create',{'kind':'channel','title':'Storage','members':['bobby']},owner);content=b'video range bytes'*600
+  folder=mod.ROOT/'videos';folder.mkdir(exist_ok=True);file=folder/(vid+'.mp4');file.write_bytes(content);(folder/(vid+'.cover-v2.jpg')).write_bytes(b'cover')
+  with mod.LOCK:
+   mod.DB.execute('INSERT INTO videos(id,owner,room,name,size,received,ready) VALUES(?,?,?,?,?,?,?)',(vid,'alice',room['id'],'storage.mp4',len(content),len(content),1));mod.DB.execute('INSERT INTO video_metadata VALUES(?,?,?,?)',(vid,1280,720,5));mod.DB.commit()
+  class FakeDisk:
+   fail=True
+   files={}
+   def folder_ready(self):pass
+   def upload(self,name,path):
+    if self.fail:raise mod.DiskError('network unavailable')
+    self.files[name]=path.read_bytes();return hashlib.sha256(self.files[name]).hexdigest()
+   def open_range(self,name,start,end,size):return io.BytesIO(self.files[name][start:end+1])
+   def delete(self,name):self.files.pop(name,None);return True
+  previous=mod.DISK;disk=FakeDisk();mod.DISK=disk
+  try:
+   # Skip unrelated fixture videos; only this id should be queued in this scenario.
+   with mod.LOCK:others=[r[0] for r in mod.DB.execute("SELECT id FROM videos WHERE id!=? AND kind='creator'",(vid,))];mod.MEDIA_JOBS.update(others)
+   mod.storage_maintenance_once();self.assertTrue(file.exists());self.assertIsNone(mod.DB.execute("SELECT 1 FROM remote_media WHERE name=? AND state='ready'",(file.name,)).fetchone())
+   disk.fail=False
+   with mod.LOCK:mod.DB.execute('UPDATE remote_media SET retry_at=0 WHERE name=?',(file.name,));mod.DB.commit()
+   mod.storage_maintenance_once();self.assertFalse(file.exists());self.assertEqual(disk.files[file.name],content)
+   request=urllib.request.Request(self.url+'/video-stream/'+vid,headers={'Authorization':'Bearer '+self.tokens['bobby'],'Range':'bytes=157-656'})
+   with urllib.request.urlopen(request) as response:self.assertEqual(response.status,206);self.assertEqual(response.read(),content[157:657])
+   self.assertEqual(self.request('/room/delete',{'id':room['id']},owner)[0],200);mod.storage_maintenance_once();self.assertNotIn(file.name,disk.files);self.assertIsNone(mod.DB.execute('SELECT 1 FROM media_garbage WHERE id=?',(vid,)).fetchone())
+  finally:
+   mod.DISK=previous
+   with mod.LOCK:mod.MEDIA_JOBS.difference_update(others)
  def test_auth_and_private_directory(self):
   self.assertEqual(self.request('/me')[0],401)
   self.assertEqual(self.request('/login',{'nick':'alice','password':'wrong password'})[0],401)
@@ -199,13 +287,12 @@ class RelayTest(unittest.TestCase):
   self.assertNotIn('email',self.request('/user/email_user',token=self.tokens['bobby'])[1])
   body['nick']='other_email';self.assertEqual(self.request('/register',body)[0],409)
   self.assertTrue(self.request('/handles?handle=other_email')[1]['available'])
-  self.assertEqual(self.request('/email/request',{},token)[0],503)
-  import hashlib
-  with self.mod.LOCK:
-   self.mod.DB.execute('INSERT INTO email_codes VALUES(?,?,?,0)',('email_user',hashlib.sha256(b'email_user:123456').hexdigest(),int(time.time())+60));self.mod.DB.commit()
-  self.assertEqual(self.request('/email/verify',{'code':'111111'},token)[0],400)
-  self.assertEqual(self.request('/email/verify',{'code':'123456'},token)[1]['email_verified'],True)
-  self.assertEqual(self.request('/email/verify',{'code':'123456'},token)[0],400)
+  self.assertEqual(self.request('/email/request',{},token)[0],200)
+  code=self.mail['player@example.org'];wrong='000000' if code!='000000' else '111111'
+  self.assertEqual(self.request('/email/verify',{'code':wrong},token)[0],400)
+  self.assertEqual(self.request('/email/verify',{'code':code},token)[1]['email_verified'],True)
+  self.assertEqual(self.request('/email/verify',{'code':code},token)[0],400)
+  self.assertEqual(self.request('/login',{'nick':'email_user','password':'correct password'})[0],403)
  def test_migration_preserves_account_key_material(self):
   with self.mod.LOCK:
    before=self.mod.DB.execute('SELECT nick,enc,sig,salt,password FROM users ORDER BY nick').fetchall()

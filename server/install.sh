@@ -38,6 +38,8 @@ install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
 install -d -o root -g oldy-chat -m 750 /etc/oldy-chat
 install -o root -g root -m 644 "$oldy_src/server.py" /opt/oldy-chat/server.py
 if [[ -f "$oldy_src/configure-mail.py" ]]; then install -o root -g root -m 700 "$oldy_src/configure-mail.py" /opt/oldy-chat/configure-mail.py; fi
+install -o root -g root -m 644 "$oldy_src/disk_storage.py" /opt/oldy-chat/disk_storage.py
+install -o root -g root -m 700 "$oldy_src/configure-disk.py" /opt/oldy-chat/configure-disk.py
 if [[ ! -f /etc/oldy-chat/server.crt ]]; then
  openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 -keyout /etc/oldy-chat/server.key -out /etc/oldy-chat/server.crt -subj '/CN=5.42.102.11' -addext 'subjectAltName=IP:5.42.102.11' >/dev/null 2>&1
 fi
@@ -66,6 +68,7 @@ Group=oldy-chat
 Environment=OLDY_DATA=/var/lib/oldy-chat
 EnvironmentFile=-/etc/oldy-chat/owner.env
 EnvironmentFile=-/etc/oldy-chat/mail.env
+EnvironmentFile=-/etc/oldy-chat/disk.env
 EnvironmentFile=-/etc/oldy-chat/turn.env
 ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key --also-443
 Restart=on-failure
@@ -197,4 +200,4 @@ echo
 echo 'OLDY CHAT: SERVER READY'
 echo 'HTTPS 443 ready; 8443 kept for existing phones.'
 openssl x509 -in /etc/oldy-chat/server.crt -noout -fingerprint -sha256
-echo 'OLDY CHAT 0.4.1: UPDATE COMPLETE. Install the new APK on both phones.'
+echo 'OLDY CHAT 0.5.0: UPDATE COMPLETE. Install the new APK on both phones.'

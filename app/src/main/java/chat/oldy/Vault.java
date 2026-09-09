@@ -29,7 +29,7 @@ final class Vault {
   if(!nick().isEmpty()){file=new AtomicFile(accountFile(nick()));save();if(openActive&&!selection.exists())activate();}
  }
  static JSONObject empty()throws Exception{return new JSONObject().put("contacts",new JSONObject()).put("rooms",new JSONObject()).put("messages",new JSONArray()).put("account_schema",2);}
- File accountFile(String nick)throws Exception{if(!nick.matches("[a-z0-9_]{3,24}"))throw new Exception("Неверный аккаунт");File dir=new File(context.getFilesDir(),"accounts");dir.mkdirs();return new File(dir,nick+".vault");}
+ File accountFile(String nick)throws Exception{if(!nick.matches("[a-z0-9_]{3,24}"))throw new Exception(I18n.t("Неверный аккаунт"));File dir=new File(context.getFilesDir(),"accounts");dir.mkdirs();return new File(dir,nick+".vault");}
  synchronized void activate()throws Exception{java.nio.file.Files.write(new File(context.getFilesDir(),"active-account").toPath(),Crypto.bytes(nick().isEmpty()?"-":nick()));}
  static Vault guest(Context c)throws Exception{Vault v=new Vault(c,"",true);v.activate();return v;}
  synchronized void save()throws Exception {
@@ -45,17 +45,29 @@ final class Vault {
  synchronized String token(){return data.optString("token");}
  synchronized void account(JSONObject reply)throws Exception{
   JSONObject u=reply.getJSONObject("user");
-  if(!nick().isEmpty()&&!nick().equals(u.getString("nick")))throw new Exception("Данные принадлежат другому аккаунту");
-  if(!Crypto.fingerprint(u).equals(Crypto.fingerprint(identity())))throw new Exception("Для этого аккаунта нужна резервная копия с прежнего телефона. Восстановите её в настройках.");
-  File enrollment=file.getBaseFile();data.put("nick",u.getString("nick")).put("name",u.getString("name")).put("token",reply.getString("token")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator"));file=new AtomicFile(accountFile(nick()));save();activate();if(enrollment.getName().startsWith("enroll-"))enrollment.delete();
+  if(!nick().isEmpty()&&!nick().equals(u.getString("nick")))throw new Exception(I18n.t("Данные принадлежат другому аккаунту"));
+  if(!Crypto.fingerprint(u).equals(Crypto.fingerprint(identity())))throw new Exception(I18n.t("Для этого аккаунта нужна резервная копия с прежнего телефона. Восстановите её в настройках."));
+  File enrollment=file.getBaseFile();data.put("nick",u.getString("nick")).put("name",u.getString("name")).put("token",reply.getString("token")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email"));file=new AtomicFile(accountFile(nick()));save();activate();if(enrollment.getName().startsWith("enroll-"))enrollment.delete();
  }
+ synchronized boolean archived(String target)throws Exception{return bucket("archived_chats").optBoolean(target);}
+ synchronized void archiveChat(String target,boolean value)throws Exception{bucket("archived_chats").put(target,value);save();}
+ synchronized JSONArray chatMessageIds(String peer)throws Exception{JSONArray ids=new JSONArray(),messages=data.getJSONArray("messages");for(int i=0;i<messages.length();i++){JSONObject m=messages.getJSONObject(i);if(m.optString("peer").equals(peer))ids.put(m.getString("id"));}return ids;}
+ synchronized void clearChat(String peer,long through)throws Exception{
+  if(through<=bucket("chat_clears").optLong(peer))return;bucket("chat_clears").put(peer,through);JSONArray old=data.getJSONArray("messages"),keep=new JSONArray();boolean newer=false;
+  for(int i=0;i<old.length();i++){JSONObject m=old.getJSONObject(i);if(m.optString("peer").equals(peer)&&m.optLong("time")<=through){String id=m.optString("id");bucket("deleted_posts").put(id,true);bucket("saved").remove(id);bucket("reactions").remove(id);if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}}else{keep.put(m);if(m.optString("peer").equals(peer))newer=true;}}
+  data.put("messages",keep);bucket("drafts").remove(peer);bucket("pins").remove(peer);bucket("archived_chats").remove(peer);if(!newer)bucket("hidden_chats").put(peer,true);save();
+ }
+ synchronized void leaveRoom(String rid)throws Exception{String peer="room:"+rid;clearChat(peer,System.currentTimeMillis());data.getJSONObject("rooms").remove(rid);bucket("channel_cursors").remove(rid);roomsRevision++;save();}
+ synchronized boolean hiddenChat(String peer)throws Exception{return bucket("hidden_chats").optBoolean(peer);}
+ synchronized void revealChat(String peer)throws Exception{if(bucket("hidden_chats").has(peer)){bucket("hidden_chats").remove(peer);save();}}
+ synchronized boolean clearedMessage(String peer,long when)throws Exception{return when<=bucket("chat_clears").optLong(peer);}
  synchronized JSONObject peer(String nick)throws Exception{return data.getJSONObject("contacts").optJSONObject(nick);}
  synchronized void pin(JSONObject peer)throws Exception{
   String n=peer.getString("nick");JSONObject old=peer(n);
-  if(old!=null&&!Crypto.fingerprint(old).equals(Crypto.fingerprint(peer)))throw new Exception("Ключ @"+n+" изменился. Передача остановлена.");
+  if(old!=null&&!Crypto.fingerprint(old).equals(Crypto.fingerprint(peer)))throw new Exception(I18n.t("Ключ @")+n+I18n.t(" изменился. Передача остановлена."));
   if(old==null||!old.toString().equals(peer.toString())){data.getJSONObject("contacts").put(n,peer);save();}
  }
- synchronized void profile(JSONObject u)throws Exception{data.put("name",u.getString("name")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator"));save();}
+ synchronized void profile(JSONObject u)throws Exception{data.put("name",u.getString("name")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email"));save();}
  synchronized void rooms(JSONArray rooms)throws Exception{JSONObject next=new JSONObject();for(int i=0;i<rooms.length();i++){JSONObject r=rooms.getJSONObject(i);next.put(r.getString("id"),r);}data.put("rooms",next);save();roomsRevision++;}
  synchronized JSONObject room(String id)throws Exception{return data.getJSONObject("rooms").optJSONObject(id);}
  synchronized void putRoom(JSONObject r)throws Exception{data.getJSONObject("rooms").put(r.getString("id"),r);save();roomsRevision++;}
@@ -63,15 +75,15 @@ final class Vault {
  synchronized void syncRooms(JSONArray rooms,long expected)throws Exception{if(expected==roomsRevision)rooms(rooms);}
  synchronized void queue(String to,String text)throws Exception{queuePayload(to,new JSONObject().put("kind","text").put("text",text),null);}
  synchronized String queuePayload(String to,JSONObject body,String local)throws Exception{
-  if(!Conversation.community(to)&&isBlocked(to))throw new Exception("Разблокируй собеседника, чтобы написать ему");
-  String id=java.util.UUID.randomUUID().toString();long now=System.currentTimeMillis();JSONObject p=new JSONObject(body.toString());
+  if(!Conversation.community(to)&&isBlocked(to))throw new Exception(I18n.t("Разблокируй собеседника, чтобы написать ему"));
+  revealChat(to);String id=java.util.UUID.randomUUID().toString();long now=System.currentTimeMillis();JSONObject p=new JSONObject(body.toString());
   JSONObject m=new JSONObject().put("id",id).put("peer",to).put("text",p.optString("text")).put("kind",p.optString("kind","text")).put("time",now).put("out",true).put("status","pending");
   if(local!=null)m.put("local",local);
   for(String key:new String[]{"mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform"})if(p.has(key))m.put(key,p.get(key));
   JSONObject envelopes=new JSONObject();
   if(Conversation.community(to)){
-   JSONObject r=room(Conversation.room(to));if(r==null)throw new Exception("Чат недоступен");
-   if(r.getString("kind").equals("channel")&&!r.getString("owner").equals(nick())&&!p.optString("kind").equals("control")&&!Conversation.thread(to))throw new Exception("Публиковать может создатель канала");
+   JSONObject r=room(Conversation.room(to));if(r==null)throw new Exception(I18n.t("Чат недоступен"));
+   if(r.getString("kind").equals("channel")&&!r.getString("owner").equals(nick())&&!p.optString("kind").equals("control")&&!Conversation.thread(to))throw new Exception(I18n.t("Публиковать может создатель канала"));
    p.put("room",r.getString("id"));if(Conversation.thread(to))p.put("thread",Conversation.post(to));JSONArray members=r.getJSONArray("members");
    for(int i=0;i<members.length();i++){String n=members.getString(i);if(!n.equals(nick())&&(!Conversation.thread(to)||peer(n).optInt("protocol",2)>=3)&&(!p.optString("kind").equals("control")||peer(n).optInt("protocol",2)>=3))envelopes.put(n,Crypto.encrypt(nick(),n,Payload.wire(compatible(p,peer(n))),id,now,identity(),peer(n)).put("room",r.getString("id")).put("action",p.optString("kind").equals("control")?p.optString("op"):Conversation.thread(to)?"comment":"publish").put("thread",Conversation.post(to)));}
   }else if(!p.optString("kind").equals("control")||peer(to).optInt("protocol",2)>=3)envelopes.put(to,Crypto.encrypt(nick(),to,Payload.wire(p),id,now,identity(),peer(to)));
@@ -87,7 +99,7 @@ final class Vault {
   for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);String peer=m.optString("peer");boolean drop=whole&&Conversation.community(peer)&&Conversation.room(peer).equals(rid)||!whole&&(m.optString("id").equals(mid)||peer.equals("thread:"+rid+":"+mid));
    if(m.optString("kind").equals("control")&&m.optJSONObject("control")!=null&&m.optJSONObject("control").optString("mid").equals(mid))drop=true;
    if(drop){removed.add(m.optString("id"));if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}bucket("saved").remove(m.optString("id"));bucket("reactions").remove(m.optString("id"));}
-   else{JSONObject reply=m.optJSONObject("reply");if(reply!=null&&reply.optString("id").equals(mid))reply.put("text","Публикация удалена");keep.put(m);}
+   else{JSONObject reply=m.optJSONObject("reply");if(reply!=null&&reply.optString("id").equals(mid))reply.put("text",I18n.t("Публикация удалена"));keep.put(m);}
   }
   data.put("messages",keep);for(String id:removed)bucket("deleted_posts").put(id,true);
   JSONObject pins=bucket("pins");java.util.Iterator<String> keys=pins.keys();while(keys.hasNext()){String key=keys.next();JSONObject pin=pins.optJSONObject(key);if(pin!=null&&(removed.contains(pin.optString("id"))||whole&&Conversation.community(key)&&Conversation.room(key).equals(rid)))keys.remove();}
@@ -95,31 +107,33 @@ final class Vault {
  }
  synchronized long deletionCursor(){return data.optLong("deletion_cursor");}
  synchronized boolean moderator(){return data.optBoolean("moderator");}
- JSONObject compatible(JSONObject p,JSONObject user)throws Exception{if(!p.optString("cloud_video").isEmpty()&&user.optInt("protocol",2)<3)return new JSONObject().put("kind","text").put("room",p.optString("room")).put("text",p.optString("text")+"\n▶ Видео в канале. Установи обновление OldЫ Chat, чтобы посмотреть его.");return p;}
+ JSONObject compatible(JSONObject p,JSONObject user)throws Exception{if(!p.optString("cloud_video").isEmpty()&&user.optInt("protocol",2)<3)return new JSONObject().put("kind","text").put("room",p.optString("room")).put("text",p.optString("text")+I18n.t("\n▶ Видео в канале. Установи обновление OldЫ Chat, чтобы посмотреть его."));return p;}
  synchronized JSONObject message(String id)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++)if(a.getJSONObject(i).getString("id").equals(id))return new JSONObject(a.getJSONObject(i).toString());return null;}
- synchronized void attachment(String id,String local)throws Exception{if(bucket("deleted_posts").has(id)){MediaFiles.path(context,local).delete();throw new Exception("Публикация удалена");}JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);if(m.getString("id").equals(id)){m.put("local",local);save();return;}}throw new Exception("Сообщение не найдено");}
+ synchronized void attachment(String id,String local)throws Exception{if(bucket("deleted_posts").has(id)){MediaFiles.path(context,local).delete();throw new Exception(I18n.t("Публикация удалена"));}JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);if(m.getString("id").equals(id)){m.put("local",local);save();return;}}throw new Exception(I18n.t("Сообщение не найдено"));}
  synchronized boolean has(String id)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++)if(a.getJSONObject(i).getString("id").equals(id))return true;return false;}
  synchronized void receive(JSONObject envelope,JSONObject peer)throws Exception{receiveDecoded(envelope,peer,Payload.parse(Crypto.decrypt(envelope,identity(),peer)));}
  synchronized void receiveDecoded(JSONObject envelope,JSONObject peer,JSONObject p)throws Exception{receiveDecoded(envelope,peer,p,false);}
  private synchronized void receiveDecoded(JSONObject envelope,JSONObject peer,JSONObject p,boolean channelHistory)throws Exception{
-  if(!envelope.getString("to").equals(nick())||!envelope.getString("from").equals(peer.getString("nick")))throw new Exception("Неверный получатель");
+  if(!envelope.getString("to").equals(nick())||!envelope.getString("from").equals(peer.getString("nick")))throw new Exception(I18n.t("Неверный получатель"));
   if(has(envelope.getString("id"))||isDeleted(envelope.getString("id"),p.optString("room"),p.optString("thread")))return;
-  String k=p.optString("kind","text");if(k.equals("signal"))throw new Exception("Неверное сообщение");
+  String k=p.optString("kind","text");if(k.equals("signal"))throw new Exception(I18n.t("Неверное сообщение"));
   String room=p.optString("room");String target=room.isEmpty()?peer.getString("nick"):p.optString("thread").isEmpty()?"room:"+room:"thread:"+room+":"+p.optString("thread");
+  if(room.isEmpty()&&clearedMessage(target,envelope.getLong("time")))return;
+  revealChat(target);
   if(!room.isEmpty()){
-   JSONObject r=room(room);if(r==null)throw new Exception("Чат недоступен");
+   JSONObject r=room(room);if(r==null)throw new Exception(I18n.t("Чат недоступен"));
    boolean member=false;JSONArray members=r.getJSONArray("members");for(int i=0;i<members.length();i++)if(members.getString(i).equals(peer.getString("nick")))member=true;
-   if((!member&&!channelHistory)||(r.getString("kind").equals("channel")&&!r.getString("owner").equals(peer.getString("nick"))&&!k.equals("control")&&p.optString("thread").isEmpty()))throw new Exception("Автор не может писать в этот чат");
+   if((!member&&!channelHistory)||(r.getString("kind").equals("channel")&&!r.getString("owner").equals(peer.getString("nick"))&&!k.equals("control")&&p.optString("thread").isEmpty()))throw new Exception(I18n.t("Автор не может писать в этот чат"));
   }
-  if(envelope.has("room")&&!envelope.optString("room").equals(room))throw new Exception("Неверный маршрут");
-  if(envelope.has("action")&&!envelope.optString("action").equals(k.equals("control")?p.optString("op"):p.optString("thread").isEmpty()?"publish":"comment"))throw new Exception("Неверное действие");
-  if(envelope.has("thread")&&!envelope.optString("thread").equals(p.optString("thread")))throw new Exception("Неверная ветка комментариев");
+  if(envelope.has("room")&&!envelope.optString("room").equals(room))throw new Exception(I18n.t("Неверный маршрут"));
+  if(envelope.has("action")&&!envelope.optString("action").equals(k.equals("control")?p.optString("op"):p.optString("thread").isEmpty()?"publish":"comment"))throw new Exception(I18n.t("Неверное действие"));
+  if(envelope.has("thread")&&!envelope.optString("thread").equals(p.optString("thread")))throw new Exception(I18n.t("Неверная ветка комментариев"));
   if(room.isEmpty()&&isBlocked(peer.getString("nick")))return;
   if(k.equals("control"))applyControl(target,peer.getString("nick"),p,envelope.getLong("time"));
   JSONObject m=new JSONObject().put("id",envelope.getString("id")).put("peer",target).put("from",peer.getString("nick")).put("text",p.optString("text")).put("kind",k).put("time",envelope.getLong("time")).put("out",false).put("status","received");
   if(k.equals("file")){
-   if(!p.optString("mime").matches("image/(jpeg|png|webp)|video/(mp4|webm)|audio/(mp4|ogg|mpeg)")||p.optLong("size")<1||p.optLong("size")>(p.optString("cloud_video").matches("[a-f0-9-]{36}")?2147483648L:MediaFiles.MAX)||!p.optString("sha256").matches("[a-fA-F0-9]{64}"))throw new Exception("Неподдерживаемое вложение");
-   for(String key:new String[]{"mime","size","sha256"})m.put(key,p.get(key));m.put("name",p.optString("name","Медиа").replaceAll("[\\r\\n/\\\\]","_").substring(0,Math.min(100,p.optString("name","Медиа").length())));
+   if(!p.optString("mime").matches("image/(jpeg|png|webp)|video/(mp4|webm)|audio/(mp4|ogg|mpeg)")||p.optLong("size")<1||p.optLong("size")>(p.optString("cloud_video").matches("[a-f0-9-]{36}")?2147483648L:MediaFiles.MAX)||!p.optString("sha256").matches("[a-fA-F0-9]{64}"))throw new Exception(I18n.t("Неподдерживаемое вложение"));
+   for(String key:new String[]{"mime","size","sha256"})m.put(key,p.get(key));m.put("name",p.optString("name",I18n.t("Медиа")).replaceAll("[\\r\\n/\\\\]","_").substring(0,Math.min(100,p.optString("name",I18n.t("Медиа")).length())));
   }
   if(k.equals("sticker"))m.put("sticker",Math.max(0,Math.min(11,p.optInt("sticker"))));
   if(k.equals("control"))m.put("control",p);
@@ -131,10 +145,10 @@ final class Vault {
  synchronized void channelSaved(String mid)throws Exception{JSONArray messages=data.getJSONArray("messages");for(int i=0;i<messages.length();i++)if(messages.getJSONObject(i).optString("id").equals(mid)){messages.getJSONObject(i).put("channel_saved",true);save();return;}}
  synchronized void channelRecord(JSONObject record,JSONObject author)throws Exception{
   String rid=record.getString("room"),mid=record.getString("id");JSONObject r=room(rid),p=record.getJSONObject("payload");
-  if(r==null||!r.optString("kind").equals("channel"))throw new Exception("Канал недоступен");
-  boolean subscribed=false;JSONArray members=r.getJSONArray("members");for(int i=0;i<members.length();i++)if(members.getString(i).equals(nick()))subscribed=true;if(!subscribed)throw new Exception("Сначала подпишитесь на канал");
+  if(r==null||!r.optString("kind").equals("channel"))throw new Exception(I18n.t("Канал недоступен"));
+  boolean subscribed=false;JSONArray members=r.getJSONArray("members");for(int i=0;i<members.length();i++)if(members.getString(i).equals(nick()))subscribed=true;if(!subscribed)throw new Exception(I18n.t("Сначала подпишитесь на канал"));
   if(isDeleted(mid,rid,p.optString("thread")))return;
-  if(has(mid)){JSONArray existing=data.getJSONArray("messages");String target=p.optString("thread").isEmpty()?"room:"+rid:"thread:"+rid+":"+p.optString("thread");for(int i=0;i<existing.length();i++){JSONObject m=existing.getJSONObject(i);if(!m.optString("id").equals(mid))continue;if(!m.optString("peer").equals(target)||!(m.optBoolean("out")?nick():m.optString("from")).equals(record.getString("from")))throw new Exception("Публикация из другого чата");for(String key:new String[]{"cloud_blob","blob_key","blob_iv","cloud_video","thumb"})if(p.has(key))m.put(key,p.get(key));m.put("channel_saved",true);save();break;}return;}
+  if(has(mid)){JSONArray existing=data.getJSONArray("messages");String target=p.optString("thread").isEmpty()?"room:"+rid:"thread:"+rid+":"+p.optString("thread");for(int i=0;i<existing.length();i++){JSONObject m=existing.getJSONObject(i);if(!m.optString("id").equals(mid))continue;if(!m.optString("peer").equals(target)||!(m.optBoolean("out")?nick():m.optString("from")).equals(record.getString("from")))throw new Exception(I18n.t("Публикация из другого чата"));for(String key:new String[]{"cloud_blob","blob_key","blob_iv","cloud_video","thumb"})if(p.has(key))m.put(key,p.get(key));m.put("channel_saved",true);save();break;}return;}
   JSONObject envelope=new JSONObject().put("id",mid).put("from",record.getString("from")).put("to",nick()).put("time",record.getLong("time")).put("room",rid);
   receiveDecoded(envelope,author,p,true);JSONArray messages=data.getJSONArray("messages");
   for(int i=0;i<messages.length();i++){JSONObject m=messages.getJSONObject(i);if(m.optString("id").equals(mid)){m.put("cloud",true).put("channel_saved",true);if(record.getString("from").equals(nick())){m.put("out",true).put("status","delivered");m.remove("from");}break;}}save();
@@ -148,8 +162,8 @@ final class Vault {
   JSONArray messages=old.getJSONArray("messages");for(int i=0;i<messages.length();i++){JSONObject prior=messages.getJSONObject(i);if(prior.optBoolean("out")&&prior.optString("id").equals(m.optString("id"))&&prior.optString("peer").equals(m.optString("peer"))&&prior.optString("sha256").equals(m.optString("sha256"))&&prior.has("local")&&MediaFiles.path(context,prior.getString("local")).isFile())return prior.getString("local");}return "";
  }
  synchronized void channelMedia(String mid,String vid,String key,String iv,String local)throws Exception{
-  if(bucket("deleted_posts").has(mid))throw new Exception("Публикация удалена");JSONArray messages=data.getJSONArray("messages");
-  for(int i=0;i<messages.length();i++){JSONObject m=messages.getJSONObject(i);if(m.optString("id").equals(mid)){m.put("cloud_blob",vid).put("blob_key",key).put("blob_iv",iv).put("local",local).remove("registered");save();return;}}throw new Exception("Публикация недоступна");
+  if(bucket("deleted_posts").has(mid))throw new Exception(I18n.t("Публикация удалена"));JSONArray messages=data.getJSONArray("messages");
+  for(int i=0;i<messages.length();i++){JSONObject m=messages.getJSONObject(i);if(m.optString("id").equals(mid)){m.put("cloud_blob",vid).put("blob_key",key).put("blob_iv",iv).put("local",local).remove("registered");save();return;}}throw new Exception(I18n.t("Публикация недоступна"));
  }
  synchronized void deliveredTo(String id,String to)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);if(!m.getString("id").equals(id))continue;JSONObject q=m.optJSONObject("envelopes");if(q!=null){q.remove(to);if(q.length()==0)m.put("status","delivered");}else{m.put("status","delivered");m.remove("envelope");}save();return;}}
  synchronized void delivered(String id)throws Exception{
@@ -167,30 +181,30 @@ final class Vault {
  synchronized JSONObject reactions(String id)throws Exception{JSONObject r=bucket("reactions").optJSONObject(id);return r==null?new JSONObject():new JSONObject(r.toString());}
  synchronized String pinned(String peer)throws Exception{return bucket("pins").optJSONObject(peer)==null?"":bucket("pins").getJSONObject(peer).optString("id");}
  synchronized void applyControl(String peer,String sender,JSONObject p,long time)throws Exception{
-  String op=p.optString("op"),id=p.optString("mid");if(!id.matches("[a-f0-9-]{36}"))throw new Exception("Неверное сообщение");
-  JSONObject target=message(id);if(target!=null&&!target.optString("peer").equals(peer))throw new Exception("Сообщение из другого чата");
+  String op=p.optString("op"),id=p.optString("mid");if(!id.matches("[a-f0-9-]{36}"))throw new Exception(I18n.t("Неверное сообщение"));
+  JSONObject target=message(id);if(target!=null&&!target.optString("peer").equals(peer))throw new Exception(I18n.t("Сообщение из другого чата"));
   if(op.equals("reaction")){
-   String emoji=p.optString("emoji");if(!emoji.isEmpty()&&!java.util.Arrays.asList(REACTIONS).contains(emoji))throw new Exception("Неизвестная реакция");
+   String emoji=p.optString("emoji");if(!emoji.isEmpty()&&!java.util.Arrays.asList(REACTIONS).contains(emoji))throw new Exception(I18n.t("Неизвестная реакция"));
    JSONObject all=bucket("reactions"),r=all.optJSONObject(id);if(r==null){r=new JSONObject();all.put(id,r);}
    JSONObject old=r.optJSONObject(sender);if(old==null||old.optLong("time")<=time)r.put(sender,new JSONObject().put("emoji",emoji).put("time",time));
   }else if(op.equals("pin")||op.equals("unpin")){
-   if(Conversation.community(peer)){JSONObject room=room(Conversation.room(peer));if(room==null||!room.optString("owner").equals(sender))throw new Exception("Закрепляет владелец чата");}
+   if(Conversation.community(peer)){JSONObject room=room(Conversation.room(peer));if(room==null||!room.optString("owner").equals(sender))throw new Exception(I18n.t("Закрепляет владелец чата"));}
    JSONObject pins=bucket("pins"),old=pins.optJSONObject(peer);if(old==null||old.optLong("time")<=time)pins.put(peer,new JSONObject().put("id",op.equals("unpin")?"":id).put("time",time));
-  }else throw new Exception("Неизвестное действие");
+  }else throw new Exception(I18n.t("Неизвестное действие"));
  }
 
  synchronized void storedTo(String id,String target)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);if(m.optString("id").equals(id)){JSONObject envelopes=m.optJSONObject("envelopes");if(envelopes!=null){envelopes.remove(target);if(envelopes.length()==0)m.put("status","stored");}save();return;}}}
  synchronized void markRegistered(String id)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++)if(a.getJSONObject(i).optString("id").equals(id)){a.getJSONObject(i).put("registered",true);save();return;}}
  synchronized void cloudSaved(String id)throws Exception{JSONArray a=data.getJSONArray("messages");for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);if(m.optString("id").equals(id)){m.put("cloud",true);save();return;}}}
  synchronized JSONObject archiveEnvelope(JSONObject m)throws Exception{JSONObject snapshot=new JSONObject(m.toString());for(String k:new String[]{"local","envelopes","envelope","cloud"})snapshot.remove(k);JSONObject p=new JSONObject().put("kind","archive").put("snapshot",snapshot);return Crypto.encrypt(nick(),nick(),Payload.wire(p),m.getString("id"),m.getLong("time"),identity(),identity());}
- synchronized void restoreSnapshot(JSONObject envelope)throws Exception{JSONObject p=Payload.parse(Crypto.decrypt(envelope,identity(),identity()));if(!p.optString("kind").equals("archive"))return;JSONObject m=p.getJSONObject("snapshot");if(!m.getString("id").equals(envelope.getString("id"))||!m.optString("peer").matches("[a-z0-9_]{3,24}|room:[a-f0-9-]{36}|thread:[a-f0-9-]{36}:[a-f0-9-]{36}"))throw new Exception("Неверная копия истории");if(has(m.getString("id"))||isDeleted(m.getString("id"),Conversation.community(m.optString("peer"))?Conversation.room(m.optString("peer")):"",Conversation.post(m.optString("peer"))))return;for(String k:new String[]{"local","envelopes","envelope"})m.remove(k);m.put("cloud",true);if(m.optBoolean("out")&&m.optString("status").equals("pending"))m.put("status","stored");if(m.optString("kind").equals("control")&&m.has("control"))applyControl(m.optString("peer"),m.optBoolean("out")?nick():m.optString("from"),m.getJSONObject("control"),m.getLong("time"));data.getJSONArray("messages").put(m);save();}
+ synchronized void restoreSnapshot(JSONObject envelope)throws Exception{JSONObject p=Payload.parse(Crypto.decrypt(envelope,identity(),identity()));if(!p.optString("kind").equals("archive"))return;JSONObject m=p.getJSONObject("snapshot");if(!m.getString("id").equals(envelope.getString("id"))||!m.optString("peer").matches("[a-z0-9_]{3,24}|room:[a-f0-9-]{36}|thread:[a-f0-9-]{36}:[a-f0-9-]{36}"))throw new Exception(I18n.t("Неверная копия истории"));if(clearedMessage(m.optString("peer"),m.optLong("time"))||has(m.getString("id"))||isDeleted(m.getString("id"),Conversation.community(m.optString("peer"))?Conversation.room(m.optString("peer")):"",Conversation.post(m.optString("peer"))))return;for(String k:new String[]{"local","envelopes","envelope"})m.remove(k);m.put("cloud",true);if(m.optBoolean("out")&&m.optString("status").equals("pending"))m.put("status","stored");if(m.optString("kind").equals("control")&&m.has("control"))applyControl(m.optString("peer"),m.optBoolean("out")?nick():m.optString("from"),m.getJSONObject("control"),m.getLong("time"));data.getJSONArray("messages").put(m);save();}
  synchronized String keyBackup()throws Exception{return new JSONObject().put("identity",identity()).put("nick",nick()).put("name",data.optString("name")).put("contacts",new JSONObject()).put("rooms",new JSONObject()).put("messages",new JSONArray()).toString();}
- synchronized void restoreKeys(String backup,JSONObject user)throws Exception{JSONObject b=new JSONObject(backup),keys=b.getJSONObject("identity");if(!Crypto.fingerprint(keys).equals(Crypto.fingerprint(user)))throw new Exception("Ключи копии не совпали");if(!nick().isEmpty()&&!nick().equals(user.getString("nick")))throw new Exception("На этом телефоне другой аккаунт. Сначала сохраните его резервную копию.");data.put("identity",keys);save();}
+ synchronized void restoreKeys(String backup,JSONObject user)throws Exception{JSONObject b=new JSONObject(backup),keys=b.getJSONObject("identity");if(!Crypto.fingerprint(keys).equals(Crypto.fingerprint(user)))throw new Exception(I18n.t("Ключи копии не совпали"));if(!nick().isEmpty()&&!nick().equals(user.getString("nick")))throw new Exception(I18n.t("На этом телефоне другой аккаунт. Сначала сохраните его резервную копию."));data.put("identity",keys);save();}
  synchronized long historyCursor(){return data.optLong("history_cursor");}
  synchronized void historyCursor(long next)throws Exception{data.put("history_cursor",next);save();}
  synchronized void restore(String plain)throws Exception{
   JSONObject next=new JSONObject(plain);JSONObject id=next.getJSONObject("identity");Crypto.fingerprint(id);id.getString("encPrivate");id.getString("sigPrivate");next.getJSONArray("messages");next.getJSONObject("contacts");if(!next.has("rooms"))next.put("rooms",new JSONObject());
-  if(data.has("nick"))throw new Exception("Восстановление доступно до входа в аккаунт.");next.remove("token");data=next;save();
+  if(data.has("nick"))throw new Exception(I18n.t("Восстановление доступно до входа в аккаунт."));next.remove("token");data=next;save();
  }
  synchronized String backup()throws Exception{JSONObject c=copy();c.remove("token");JSONArray a=c.getJSONArray("messages");for(int i=0;i<a.length();i++)a.getJSONObject(i).remove("local");return c.toString();}
 }

@@ -9,7 +9,7 @@ final class Art extends View {
  static Bitmap mascot,avatars;float testTime=-1;static final android.util.LruCache<String,Bitmap> photos=new android.util.LruCache<>(40);
  static final ExecutorService fetch=Executors.newFixedThreadPool(2);
  final Paint p=new Paint(3);final String key;final int type,index;boolean requested,portrait;Bitmap photo;
- Art(Context c,String k){super(c);key=k==null?"preset:0":k;type=key.equals("mascot")?2:key.startsWith("sticker:")?1:0;int n=0;try{n=Integer.parseInt(key.substring(key.indexOf(':')+1));}catch(Exception ignored){}index=Math.max(0,Math.min(11,n));setContentDescription(type==2?"Старый геймер: гуляет, приседает и пишет":type==1?"Анимированный эмодзи":"Аватар");
+ Art(Context c,String k){super(c);key=k==null?"preset:0":k;type=key.equals("mascot")?2:key.startsWith("sticker:")?1:0;int n=0;try{n=Integer.parseInt(key.substring(key.indexOf(':')+1));}catch(Exception ignored){}index=Math.max(0,Math.min(11,n));setContentDescription(type==2?I18n.t("Старый геймер: гуляет, приседает и пишет"):type==1?I18n.t("Анимированный эмодзи"):I18n.t("Аватар"));
   if(type==2&&mascot==null)try{BitmapFactory.Options opt=new BitmapFactory.Options();opt.inSampleSize=1;mascot=BitmapFactory.decodeStream(c.getAssets().open("mascot-v3.webp"),null,opt);}catch(Exception ignored){}
   if(type==0&&!key.startsWith("photo:")&&avatars==null)try{avatars=BitmapFactory.decodeStream(c.getAssets().open("avatars-v3.webp"));}catch(Exception ignored){}
  }

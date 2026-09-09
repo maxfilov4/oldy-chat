@@ -12,7 +12,7 @@ from pathlib import Path
 s=Path('build/window.xml').read_text()
 assert 'OldЫ Chat' in s, s
 assert 'Регистрация' in s, s
-assert 'Пароль' in s, s
+assert 'Электронная почта' in s and 'Получить код на почту' in s, s
 assert 'FATAL EXCEPTION' not in s
 print('PASS: login screen rendered on Android')
 PY
@@ -97,6 +97,9 @@ grep -q 'OLDY_CAPTURE_PASS' build/capture-results.txt
 timeout 200s adb shell am instrument -w chat.oldy.tests/chat.oldy.CallInstrumentation > build/call-results.txt
 cat build/call-results.txt
 grep -q 'OLDY_CALL_PASS' build/call-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ExperienceInstrumentation > build/experience-results.txt
+cat build/experience-results.txt
+grep -q OLDY_EXPERIENCE_PASS build/experience-results.txt
 adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi
