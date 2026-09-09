@@ -7,16 +7,19 @@ from pathlib import Path
 parser=argparse.ArgumentParser()
 parser.add_argument('metadata',type=Path)
 parser.add_argument('output',type=Path)
+parser.add_argument('--publish-only',action='store_true',help='Publish APK to an already updated server without restarting it')
 args=parser.parse_args();meta=json.loads(args.metadata.read_text())
 for key in ('zip_sha256','bundle_sha256'):
  if len(meta[key])!=64 or any(c not in '0123456789abcdef' for c in meta[key]):raise SystemExit('Invalid SHA-256')
 if not meta['url'].startswith('https://'):raise SystemExit('HTTPS URL required')
-script=r'''import fcntl, hashlib, io, json, os, pathlib, subprocess, tarfile, tempfile, time, urllib.request, urllib.error, zipfile
+script=r'''import fcntl, hashlib, io, json, os, pathlib, ssl, subprocess, tarfile, tempfile, time, urllib.request, urllib.error, zipfile
 if os.geteuid()!=0:raise SystemExit('Открой консоль сервера под root.')
 lock=open('/var/lock/oldy-update.lock','w')
 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 except BlockingIOError:raise SystemExit('Обновление уже выполняется в другой консоли.')
 release=META
+publish_only=PUBLISH_ONLY
+PUBLISHER
 archive_name='OldyChat-0.5.0-server.tar.gz'
 cache=pathlib.Path('/root')/archive_name
 with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
@@ -63,11 +66,26 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
  manifest=json.loads((folder/'release.json').read_text());apk=folder/'OldyChat-latest.apk'
  if manifest['package']!='chat.oldy' or manifest['version_code']!=7 or manifest['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or manifest['size']!=apk.stat().st_size:raise SystemExit('Проверка APK не пройдена. Сервер не изменён.')
  cached=cache.with_suffix('.download');cached.write_bytes(bundle);cached.chmod(0o600);os.replace(cached,cache)
- print('Проверка пройдена. Сохраняем копию базы и обновляем сервер…',flush=True)
- subprocess.run(['bash',str(folder/'install.sh')],check=True)
- print('Готово. Установи OldyChat-0.5.0.apk поверх текущего приложения на обоих телефонах.',flush=True)
+ if publish_only:
+  if not pathlib.Path('/etc/oldy-chat/server.crt').is_file() or not pathlib.Path('/var/lib/oldy-chat').is_dir():raise SystemExit('Сначала установи сервер OldЫ Chat.')
+  print('Публикуем APK для обновления внутри приложения…',flush=True)
+  publish_release(folder,'/var/lib/oldy-chat/releases')
+ else:
+  print('Проверка пройдена. Сохраняем копию базы и обновляем сервер…',flush=True)
+  with subprocess.Popen(['bash',str(folder/'install.sh')],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True) as process:
+   for line in process.stdout:
+    if 'UPDATE COMPLETE. Install the new APK on both phones.' not in line:print(line,end='',flush=True)
+   if process.wait()!=0:raise SystemExit('Установка сервера завершилась с ошибкой. Обновление не подтверждено.')
+ print('Проверяем выдачу обновления и скачивание APK…',flush=True)
+ try:
+  ctx=ssl.create_default_context(cafile='/etc/oldy-chat/server.crt')
+  verify_update('https://5.42.102.11',manifest,context=ctx)
+  verify_update('https://5.42.102.11:8443',manifest,context=ctx,download=False)
+ except Exception as error:raise SystemExit('Проверка обновления не пройдена: '+str(error)+'. Пришли этот вывод; приложение удалять не нужно.')
+ print('OLDY CHAT: UPDATE AVAILABLE 0.5.0-beta',flush=True)
+ print('Теперь в текущем приложении: Настройки → Обновления → Обновить. Удалять приложение не нужно.',flush=True)
  if not pathlib.Path('/etc/oldy-chat/mail.env').exists():print('Для писем с кодом выполни: python3 /opt/oldy-chat/configure-mail.py',flush=True)
-'''.replace('META',repr({k:meta[k] for k in ('url','zip_sha256','bundle_sha256')}))
+'''.replace('META',repr({k:meta[k] for k in ('url','zip_sha256','bundle_sha256')})).replace('PUBLISH_ONLY',repr(args.publish_only)).replace('PUBLISHER',Path(__file__).with_name('update-publisher.py').read_text())
 ast.parse(script)
 args.output.write_text("python3 - <<'OLDY_UPDATE_050'\n"+script+"OLDY_UPDATE_050\n")
 print(json.dumps({'file':str(args.output),'bytes':args.output.stat().st_size,'sha256':hashlib.sha256(args.output.read_bytes()).hexdigest()}))

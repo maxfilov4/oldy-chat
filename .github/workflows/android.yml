@@ -71,7 +71,7 @@ jobs:
           name: OldyChat-beta
           path: |
             build/OldyChat-beta.apk
-            build/Install-OldyChat.txt
+            build/Server-maintenance-only.txt
             build/OldyChat-0.5.0-server.tar.gz
             build/release/release.json
             build/design-results.txt
