@@ -52,7 +52,7 @@ public class ChatService extends Service {
   }catch(Exception e){checked=false;state=e instanceof Api.Failure&&((Api.Failure)e).status==401?"Нужно войти снова":"Нет подключения";changed(this);pause(3000);}finally{if(wake.isHeld())wake.release();}}
  }
  void sync()throws Exception{
-  try{api.call("/capabilities",new JSONObject().put("protocol",3),vault.token());vault.rooms(api.call("/rooms",null,vault.token()).getJSONArray("rooms"));vault.profile(api.call("/me",null,vault.token()));vault.blocks(api.call("/blocks",null,vault.token()).getJSONArray("blocked"));cloudSync();}catch(Api.Failure e){if(e.status!=404)throw e;}
+  try{api.call("/capabilities",new JSONObject().put("protocol",3),vault.token());long revision=vault.roomRevision();vault.syncRooms(api.call("/rooms",null,vault.token()).getJSONArray("rooms"),revision);vault.profile(api.call("/me",null,vault.token()));vault.blocks(api.call("/blocks",null,vault.token()).getJSONArray("blocked"));cloudSync();}catch(Api.Failure e){if(e.status!=404)throw e;}
  }
  void send(){long lastSync=0;while(running){try{
    if(vault.token().isEmpty()){pause(3000);continue;}

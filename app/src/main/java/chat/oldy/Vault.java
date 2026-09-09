@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 final class Vault {
  final AtomicFile file;
  JSONObject data;
- String committed;
+ String committed;long roomsRevision;
  Vault(Context c)throws Exception {
   file=new AtomicFile(new File(c.getFilesDir(),"history.vault"));
   if(file.getBaseFile().exists())data=new JSONObject(new String(Crypto.openLocal(file.readFully()),StandardCharsets.UTF_8));
@@ -39,9 +39,11 @@ final class Vault {
   if(old==null||!old.toString().equals(peer.toString())){data.getJSONObject("contacts").put(n,peer);save();}
  }
  synchronized void profile(JSONObject u)throws Exception{data.put("name",u.getString("name")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video"));save();}
- synchronized void rooms(JSONArray rooms)throws Exception{JSONObject next=new JSONObject();for(int i=0;i<rooms.length();i++){JSONObject r=rooms.getJSONObject(i);next.put(r.getString("id"),r);}data.put("rooms",next);save();}
+ synchronized void rooms(JSONArray rooms)throws Exception{JSONObject next=new JSONObject();for(int i=0;i<rooms.length();i++){JSONObject r=rooms.getJSONObject(i);next.put(r.getString("id"),r);}data.put("rooms",next);save();roomsRevision++;}
  synchronized JSONObject room(String id)throws Exception{return data.getJSONObject("rooms").optJSONObject(id);}
- synchronized void putRoom(JSONObject r)throws Exception{data.getJSONObject("rooms").put(r.getString("id"),r);save();}
+ synchronized void putRoom(JSONObject r)throws Exception{data.getJSONObject("rooms").put(r.getString("id"),r);save();roomsRevision++;}
+ synchronized long roomRevision(){return roomsRevision;}
+ synchronized void syncRooms(JSONArray rooms,long expected)throws Exception{if(expected==roomsRevision)rooms(rooms);}
  synchronized void queue(String to,String text)throws Exception{queuePayload(to,new JSONObject().put("kind","text").put("text",text),null);}
  synchronized String queuePayload(String to,JSONObject body,String local)throws Exception{
   if(!Conversation.community(to)&&isBlocked(to))throw new Exception("Разблокируй собеседника, чтобы написать ему");
