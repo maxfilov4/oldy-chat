@@ -521,9 +521,9 @@ def mail_code(email,code):
  from email.utils import formataddr,formatdate,make_msgid,parseaddr
  address=parseaddr(sender)[1]
  if not re.fullmatch(r'[^\s@]+@[^\s@]+',address):raise Problem(503,'Адрес отправителя настроен неверно')
- msg=EmailMessage();msg['Subject']='Код подтверждения Oldy Chat';msg['From']=formataddr(('Oldy Chat',address));msg['To']=email
+ msg=EmailMessage();msg['Subject']='Oldy Chat — код / code';msg['From']=formataddr(('Oldy Chat',address));msg['To']=email
  msg['Date']=formatdate(localtime=False,usegmt=True);msg['Message-ID']=make_msgid(domain=address.rsplit('@',1)[1]);msg['Auto-Submitted']='auto-generated'
- msg.set_content('Ваш код для Oldy Chat: '+code+'\n\nКод действует 10 минут. Введите его в приложении.\nЕсли вы не запрашивали код, просто проигнорируйте это письмо.',charset='utf-8')
+ msg.set_content('Ваш код для Oldy Chat: '+code+'\n\nКод действует 10 минут. Введите его в приложении.\nЕсли вы не запрашивали код, просто проигнорируйте это письмо.\n\nYour Oldy Chat code: '+code+'\nThis code expires in 10 minutes. Enter it in the app. If you did not request it, ignore this email.',charset='utf-8')
  try:
   port=int(os.environ.get('OLDY_SMTP_PORT','587'));tls=ssl.create_default_context()
   smtp=smtplib.SMTP_SSL(host,port,context=tls,timeout=15) if port==465 else smtplib.SMTP(host,port,timeout=15)

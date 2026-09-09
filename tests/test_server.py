@@ -127,6 +127,20 @@ class RelayTest(unittest.TestCase):
   self.assertEqual(self.request('/history/store',{'envelope':copy},self.tokens['alice'])[0],200);self.assertEqual(self.request('/history',token=self.tokens['alice'])[1]['items'],[])
   self.assertEqual(self.request('/user/bobby',token=self.tokens['alice'])[0],200)
   self.assertIn('bobby',[r['peer'] for r in self.request('/chats/cleared',token=self.tokens['alice'])[1]['items']]);self.assertEqual(self.request('/chats/cleared',token=self.tokens['bobby'])[1]['items'],[])
+ def test_real_quality_encodes_requested_resolution_without_upscaling(self):
+  import shutil,subprocess
+  if not shutil.which('ffmpeg'):self.skipTest('ffmpeg required')
+  vid=str(uuid.uuid4());folder=self.mod.ROOT/'videos';folder.mkdir(exist_ok=True);source=folder/(vid+'.mp4')
+  subprocess.run(['ffmpeg','-v','error','-threads','1','-filter_threads','1','-f','lavfi','-i','color=c=blue:s=1440x600:r=10','-t','0.7','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-y',str(source)],check=True,timeout=30)
+  owner=self.tokens['alice'];_,room=self.request('/room/create',{'kind':'channel','title':'Quality','members':[]},owner);size=source.stat().st_size
+  with self.mod.LOCK:self.mod.DB.execute('INSERT INTO videos(id,owner,room,name,size,received,ready) VALUES(?,?,?,?,?,?,?)',(vid,'alice',room['id'],'quality.mp4',size,size,1));self.mod.DB.commit()
+  status,choices=self.request('/videos/qualities?id='+vid,token=owner);self.assertEqual(status,200);self.assertEqual([r['quality'] for r in choices['items']],[480])
+  self.assertEqual(self.request('/videos/quality',{'id':vid,'quality':720},owner)[0],400)
+  status,state=self.request('/videos/quality',{'id':vid,'quality':480},owner);self.assertEqual(status,200);deadline=time.time()+30
+  while state['state']!='ready' and time.time()<deadline:
+   time.sleep(.1);status,state=self.request('/videos/quality',{'id':vid,'quality':480},owner)
+  self.assertEqual(state['state'],'ready',state);output=folder/(vid+'.480.mp4');data=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=width,height','-of','json',str(output)]));stream=data['streams'][0];self.assertEqual((stream['width'],stream['height']),(1152,480))
+  with urllib.request.urlopen(urllib.request.Request(self.url+'/video-stream/'+vid+'?quality=480',headers={'Authorization':'Bearer '+owner,'Range':'bytes=0-127'})) as response:self.assertEqual(response.status,206);self.assertEqual(response.read(),output.read_bytes()[:128])
  def test_custom_cover_ownership_pixels_and_natural_aspect(self):
   import io
   from PIL import Image
