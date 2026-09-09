@@ -7,4 +7,5 @@
  <instrumentation android:name="chat.oldy.DesignInstrumentation" android:targetPackage="chat.oldy"/>
 <instrumentation android:name="chat.oldy.VideoInstrumentation" android:targetPackage="chat.oldy" />
  <instrumentation android:name="chat.oldy.UpdateInstrumentation" android:targetPackage="chat.oldy"/>
+ <instrumentation android:name="chat.oldy.CaptureInstrumentation" android:targetPackage="chat.oldy"/>
 </manifest>

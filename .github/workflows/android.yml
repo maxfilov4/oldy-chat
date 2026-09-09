@@ -66,6 +66,7 @@ jobs:
             build/design-results.txt
             build/video-results.txt
             build/update-results.txt
+            build/capture-results.txt
             build/screenshots
             build/android-errors.log
             build/crypto-results.txt

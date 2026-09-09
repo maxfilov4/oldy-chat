@@ -77,6 +77,11 @@ grep -q 'OLDY_VIDEO_PASS' build/video-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpdateInstrumentation > build/update-results.txt
 cat build/update-results.txt
 grep -q 'OLDY_UPDATE_PASS' build/update-results.txt
+adb shell pm grant chat.oldy android.permission.RECORD_AUDIO
+adb shell pm grant chat.oldy android.permission.CAMERA
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt
+cat build/capture-results.txt
+grep -q 'OLDY_CAPTURE_PASS' build/capture-results.txt
 adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi
