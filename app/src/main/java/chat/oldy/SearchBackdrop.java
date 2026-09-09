@@ -7,6 +7,7 @@ final class SearchBackdrop extends Drawable implements Runnable {
  final boolean light,motion; final Paint p=new Paint(3); final float density;
  SearchBackdrop(MainActivity a){light=a.light;motion=Notices.prefs(a).getBoolean("motion",true);density=a.getResources().getDisplayMetrics().density;}
  public void draw(Canvas c){Rect b=getBounds();float w=b.width(),h=b.height();
+  p.setStyle(Paint.Style.FILL);p.setColor(Color.WHITE);p.setAlpha(255);
   p.setShader(new LinearGradient(0,0,w,h,light?0xffedf3ff:0xff131e33,light?0xfff1eaf8:0xff251d35,Shader.TileMode.CLAMP));c.drawRect(b,p);
   p.setShader(new RadialGradient(w*.9f,h*.38f,Math.max(1,w*.9f),new int[]{light?0x5579b9ec:0x383b98c2,0x00000000},null,Shader.TileMode.CLAMP));c.drawRect(b,p);p.setShader(null);
   float t=motion?SystemClock.uptimeMillis()/24000f:0;p.setStrokeWidth(density);p.setStyle(Paint.Style.STROKE);p.setColor(light?0x226b77b1:0x287fa8d9);

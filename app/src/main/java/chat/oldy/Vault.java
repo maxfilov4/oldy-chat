@@ -12,7 +12,7 @@ final class Vault {
  String committed,lastMessages="";long roomsRevision,messageRevision;
  Vault(Context c)throws Exception{this(c,null,false);}
  Vault(Context c,String account,boolean fresh)throws Exception {
-  context=c;File selection=new File(c.getFilesDir(),"active-account");
+  context=c;boolean openActive=account==null;File selection=new File(c.getFilesDir(),"active-account");
   if(account==null&&selection.exists())account=new String(java.nio.file.Files.readAllBytes(selection.toPath()),StandardCharsets.UTF_8).trim();
   File source=account!=null?(account.matches("[a-z0-9_]{3,24}")?accountFile(account):new File(c.getFilesDir(),"guest.vault")):new File(c.getFilesDir(),"history.vault");
   if(fresh)source=new File(c.getFilesDir(),"enroll-"+java.util.UUID.randomUUID()+".vault");
@@ -26,7 +26,7 @@ final class Vault {
    JSONObject clean=empty();for(String k:new String[]{"identity","nick","name","token","avatar","bio","email","email_verified","creator_video"})if(data.has(k))clean.put(k,data.get(k));data=clean;
   }
   data.put("account_schema",2);committed=data.toString();
-  if(!nick().isEmpty()){file=new AtomicFile(accountFile(nick()));save();}
+  if(!nick().isEmpty()){file=new AtomicFile(accountFile(nick()));save();if(openActive&&!selection.exists())activate();}
  }
  static JSONObject empty()throws Exception{return new JSONObject().put("contacts",new JSONObject()).put("rooms",new JSONObject()).put("messages",new JSONArray()).put("account_schema",2);}
  File accountFile(String nick)throws Exception{if(!nick.matches("[a-z0-9_]{3,24}"))throw new Exception("Неверный аккаунт");File dir=new File(context.getFilesDir(),"accounts");dir.mkdirs();return new File(dir,nick+".vault");}
