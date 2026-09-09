@@ -30,15 +30,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
+      - name: Prepare isolated call relay and video tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y coturn ffmpeg
+          sudo systemctl stop coturn
       - name: Server tests
         run: |
           python3 -m pip install cryptography pillow aiortc==1.15.0
           python3 -m unittest discover -s tests -v
-      - name: Prepare isolated call relay
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y coturn
-          sudo systemctl stop coturn
       - name: Build signed APK
         run: bash tools/build-apk.sh
       - name: Enable KVM
