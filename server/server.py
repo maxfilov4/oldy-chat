@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Oldy Chat beta: authenticated TLS API, encrypted message archive,
 ephemeral WebRTC signalling, and owner-only channel MP4 storage.
-Message bodies and password-protected key backups stay opaque to the server.
+Personal/group message bodies and password-protected key backups stay opaque.
+Shared channel history is signed, access-controlled and encrypted at rest.
 Channel MP4 files are ordinary server files, not end-to-end encrypted.
 """
 import subprocess, shutil, io, uuid, base64, hashlib, hmac, json, os, re, secrets, socket, sqlite3, ssl, threading, time
@@ -266,7 +267,7 @@ def make_video_cover(vid):
    item=DB.execute('SELECT ready,kind FROM videos WHERE id=?',(vid,)).fetchone()
    if not item or not item[0] or item[1]=='blob':raise Problem(404,'Видео недоступно')
   for offset in ('1','0'):
-   command=['ffmpeg','-nostdin','-v','error','-threads','1','-ss',offset,'-i',str(ROOT/'videos'/(vid+'.mp4')),'-t','4','-an','-vf','thumbnail=30,scale=480:480:force_original_aspect_ratio=decrease','-frames:v','1','-threads','1','-q:v','4','-y',str(temporary)]
+   command=['ffmpeg','-nostdin','-v','error','-threads','1','-filter_threads','1','-protocol_whitelist','file,pipe','-ss',offset,'-f','mov','-i',str(ROOT/'videos'/(vid+'.mp4')),'-t','4','-an','-vf','scale=480:480:force_original_aspect_ratio=decrease,thumbnail=30','-frames:v','1','-threads','1','-q:v','4','-y',str(temporary)]
    result=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=25)
    if result.returncode==0 and temporary.is_file() and 0<temporary.stat().st_size<250000:break
   else:raise Problem(422,'Не удалось извлечь кадр видео')
