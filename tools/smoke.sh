@@ -25,7 +25,7 @@ turnserver -c /dev/null --listening-ip=0.0.0.0 --listening-port=3478 --realm=old
 turn_pid=$!
 python3 tests/device-server.py > build/device-server.log 2>&1 &
 server_pid=$!
-trap 'adb logcat -d -s AndroidRuntime:E MediaPlayer:E > build/android-errors.log; adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" "$turn_pid" 2>/dev/null || true' EXIT
+trap 'adb logcat -d -s Camera2Session:D CameraCapturer:D EglRenderer:D oldy-round-encoder:D MediaCodec:E CCodec:E > build/capture-debug.log; adb logcat -d -s AndroidRuntime:E MediaPlayer:E > build/android-errors.log; adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" "$turn_pid" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 30); do
  if [[ -f build/device-server/pin.txt ]]; then break; fi
  sleep 1
@@ -83,6 +83,9 @@ grep -q 'OLDY_VIDEO_PASS' build/video-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpdateInstrumentation > build/update-results.txt
 cat build/update-results.txt
 grep -q 'OLDY_UPDATE_PASS' build/update-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ChannelInstrumentation > build/channel-results.txt
+cat build/channel-results.txt
+grep -q 'OLDY_CHANNEL_PASS' build/channel-results.txt
 adb shell pm grant chat.oldy android.permission.RECORD_AUDIO
 adb shell pm grant chat.oldy android.permission.CAMERA
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt

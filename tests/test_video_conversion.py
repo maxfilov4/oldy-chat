@@ -13,6 +13,11 @@ class ConversionTest(unittest.TestCase):
     with relay.LOCK:
      relay.DB.execute('INSERT INTO videos(id,owner,room,name,size,received,ready) VALUES(?,?,?,?,?,?,1)',(vid,'alice','fixture','portrait.mp4',source.stat().st_size,source.stat().st_size))
      relay.DB.execute("INSERT INTO video_variants(id,state) VALUES(?,'processing')",(vid,));relay.DB.commit();relay.MEDIA_JOBS.add(vid)
+    cover=relay.make_video_cover(vid);self.assertTrue(cover.is_file())
+    from PIL import Image,ImageStat
+    with Image.open(cover) as picture:
+     self.assertEqual(picture.format,'JPEG');self.assertGreater(max(ImageStat.Stat(picture).stddev),20,'Cover should contain a real video frame')
+    self.assertEqual(relay.make_video_cover(vid),cover)
     relay.compatible_video(vid)
     variant=folder/(vid+'.compat.mp4');self.assertTrue(variant.exists());self.assertEqual(relay.DB.execute('SELECT state FROM video_variants WHERE id=?',(vid,)).fetchone()[0],'ready')
     info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(variant)]))
@@ -21,5 +26,5 @@ class ConversionTest(unittest.TestCase):
     frames=subprocess.check_output(['ffmpeg','-nostdin','-v','error','-i',str(variant),'-map','0:v:0','-vf','fps=2,scale=32:32','-f','framemd5','-'],timeout=20).decode().splitlines();hashes=[row.split(',')[-1].strip() for row in frames if row and not row.startswith('#')]
     self.assertGreaterEqual(len(set(hashes)),3,'Output must contain changing frames, not a frozen image')
     with relay.LOCK:relay.DB.execute('INSERT INTO media_garbage VALUES(?)',(vid,));relay.DB.execute('DELETE FROM videos WHERE id=?',(vid,));relay.DB.commit()
-    relay.collect_media();self.assertFalse(source.exists());self.assertFalse(variant.exists())
+    relay.collect_media();self.assertFalse(source.exists());self.assertFalse(variant.exists());self.assertFalse(cover.exists())
    finally:relay.DB.close()

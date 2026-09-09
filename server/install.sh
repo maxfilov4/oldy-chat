@@ -10,11 +10,13 @@ oldy_backup="/var/backups/oldy-chat/$(date -u +%Y%m%d-%H%M%S)"
 install -d -m 700 "$oldy_backup"
 if [[ -f /opt/oldy-chat/server.py ]]; then cp /opt/oldy-chat/server.py "$oldy_backup/server.py"; fi
 OLDY_BACKUP_DIR="$oldy_backup" python3 - <<'PYBACKUP'
-import sqlite3,os
+import sqlite3,os,shutil
 from pathlib import Path
 source=Path('/var/lib/oldy-chat/accounts.sqlite3')
 if source.exists():
  with sqlite3.connect(source) as src,sqlite3.connect(Path(os.environ['OLDY_BACKUP_DIR'])/'accounts.sqlite3') as dst:src.backup(dst)
+key=Path('/var/lib/oldy-chat/channel-history.key')
+if key.exists():shutil.copy2(key,Path(os.environ['OLDY_BACKUP_DIR'])/key.name)
 PYBACKUP
 if ss -H -ltnp '( sport = :443 )' | grep -q .; then
  oldy_pid=$(systemctl show oldy-chat --property MainPID --value 2>/dev/null || true)

@@ -32,6 +32,51 @@ class RelayTest(unittest.TestCase):
   self.mod.LIMITS.clear()
   with self.mod.LOCK:
    self.mod.DB.execute("DELETE FROM archive");self.mod.DB.commit()
+ def channel_record(self,rid,text='Published before joining',nick='alice',mid=None,thread='',control=None,extra=None):
+  payload={'kind':'text','text':text,'room':rid}
+  if thread:payload['thread']=thread
+  if control:payload.update(control)
+  if extra:payload.update(extra)
+  record={'v':1,'id':mid or str(uuid.uuid4()),'room':rid,'from':nick,'time':int(time.time()*1000),'payload':payload};raw=json.dumps(record,separators=(',',':'),ensure_ascii=False)
+  return {'record':raw,'signature':base64.b64encode(self.signing.sign(('oldy-channel-v1\n'+raw).encode(),ec.ECDSA(hashes.SHA256()))).decode()}
+ def test_channel_history_survives_restart_and_is_visible_to_later_members(self):
+  owner=self.tokens['alice'];viewer=self.tokens['eve_test'];code,room=self.request('/room/create',{'kind':'channel','title':'Past publications','public':True,'members':[]},owner);self.assertEqual(code,200);rid=room['id']
+  publication=self.channel_record(rid);mid=json.loads(publication['record'])['id'];self.assertEqual(self.request('/channels/history/store',publication,owner)[0],200)
+  code,again=self.request('/channels/history/store',publication,owner);self.assertEqual(code,200)
+  raw=self.mod.DB.execute('SELECT body FROM channel_history WHERE mid=?',(mid,)).fetchone()[0];self.assertNotIn(b'Published before joining',raw)
+  self.assertEqual(self.request('/channels/history?room='+rid,token=viewer)[0],404)
+  with self.mod.LOCK:self.mod.DB.close();self.mod.init_db()
+  self.assertEqual(self.request('/room/join',{'id':rid},viewer)[0],200)
+  code,history=self.request('/channels/history?room='+rid,token=viewer);self.assertEqual(code,200);self.assertEqual(history['items'][0]['record'],publication['record']);self.assertEqual(len(history['items']),1)
+  self.assertEqual(self.request('/channels/history?room='+rid+'&after='+str(history['next']),token=viewer)[1]['items'],[])
+  self.assertEqual(self.request('/history',token=viewer)[1]['items'],[],'Channel history must not expose another account vault')
+  self.request('/room/ban',{'id':rid,'target':'eve_test','banned':True},owner);self.assertEqual(self.request('/channels/history?room='+rid,token=viewer)[0],404)
+ def test_channel_history_author_signature_permissions_and_delete(self):
+  owner=self.tokens['alice'];viewer=self.tokens['bobby'];_,room=self.request('/room/create',{'kind':'channel','title':'Signed archive','members':['bobby']},owner);rid=room['id'];publication=self.channel_record(rid);mid=json.loads(publication['record'])['id']
+  bad=dict(publication);bad['record']=bad['record'].replace('Published','Tampered');self.assertEqual(self.request('/channels/history/store',bad,owner)[0],400)
+  self.assertEqual(self.request('/channels/history/store',publication,viewer)[0],400)
+  self.assertEqual(self.request('/channels/history/store',self.channel_record(rid,nick='bobby'),viewer)[0],403)
+  self.assertEqual(self.request('/channels/history/store',publication,owner)[0],200)
+  changed=self.channel_record(rid,text='Rewritten',mid=mid);self.assertEqual(self.request('/channels/history/store',changed,owner)[0],409)
+  comment=self.channel_record(rid,nick='bobby',thread=mid,text='First comment');self.assertEqual(self.request('/channels/history/store',comment,viewer)[0],200)
+  reaction=self.channel_record(rid,nick='bobby',control={'kind':'control','op':'reaction','mid':mid,'emoji':'🔥'});self.assertEqual(self.request('/channels/history/store',reaction,viewer)[0],200)
+  pin=self.channel_record(rid,nick='bobby',control={'kind':'control','op':'pin','mid':mid});self.assertEqual(self.request('/channels/history/store',pin,viewer)[0],403)
+  self.assertEqual(len(self.request('/channels/history?room='+rid,token=viewer)[1]['items']),3)
+  self.assertEqual(self.request('/posts/delete',{'room':rid,'mid':mid},viewer)[0],403)
+  self.assertEqual(self.request('/posts/delete',{'room':rid,'mid':mid},owner)[0],200)
+  self.assertEqual(self.request('/channels/history?room='+rid,token=viewer)[1]['items'],[])
+  self.assertEqual(self.request('/channels/history/store',publication,owner)[0],410)
+ def test_channel_history_pagination_and_room_deletion(self):
+  owner=self.tokens['alice'];_,room=self.request('/room/create',{'kind':'channel','title':'Many posts','members':[]},owner);rid=room['id']
+  for i in range(23):self.assertEqual(self.request('/channels/history/store',self.channel_record(rid,text='Post '+str(i)),owner)[0],200)
+  page=self.request('/channels/history?room='+rid,token=owner)[1];self.assertEqual(len(page['items']),20);self.assertTrue(page['more'])
+  next_page=self.request('/channels/history?room='+rid+'&after='+str(page['next']),token=owner)[1];self.assertEqual(len(next_page['items']),3);self.assertFalse(next_page['more'])
+  self.assertEqual(self.request('/room/delete',{'id':rid},owner)[0],200)
+  self.assertFalse(self.mod.DB.execute('SELECT 1 FROM channel_history WHERE room=?',(rid,)).fetchone())
+ def test_signup_without_email_rejected_even_with_nickname(self):
+  body={'nick':'no_email_signup','password':'correct strong password',**self.keys,'ticket':'','code':''}
+  self.assertEqual(self.request('/register',body)[0],400)
+  self.assertIsNone(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',('no_email_signup',)).fetchone())
  def test_auth_and_private_directory(self):
   self.assertEqual(self.request('/me')[0],401)
   self.assertEqual(self.request('/login',{'nick':'alice','password':'wrong password'})[0],401)

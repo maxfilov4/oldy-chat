@@ -11,7 +11,7 @@ import java.util.*;
 final class RoundEncoder {
  MediaCodec video,audio;MediaMuxer mux;AudioRecord mic;EglRenderer renderer;Surface input;
  final long started=System.nanoTime();Thread videoThread,audioThread;final File file;volatile long drainUntil;
- volatile boolean recording=true;volatile Exception failure;int videoTrack=-1,audioTrack=-1;boolean muxStarted;int videoSamples,audioSamples;long pendingBytes;
+ volatile boolean recording=true;volatile Exception failure;int videoTrack=-1,audioTrack=-1;boolean muxStarted;volatile int videoSamples,audioSamples;long pendingBytes;
  final List<Packet> pending=new ArrayList<>();
  static class Packet {boolean video;byte[] bytes;long pts;int flags;Packet(boolean v,byte[] b,long p,int f){video=v;bytes=b;pts=p;flags=f;}}
  RoundEncoder(File target,EglBase.Context shared)throws Exception{
@@ -22,7 +22,7 @@ final class RoundEncoder {
   renderer=new EglRenderer("oldy-round-encoder");renderer.init(shared,EglBase.CONFIG_RECORDABLE,new GlRectDrawer(),true);renderer.setLayoutAspectRatio(1);renderer.createEglSurface(input);renderer.setFpsReduction(30);
   mic.startRecording();videoThread=new Thread(()->videoLoop(),"oldy-round-video");audioThread=new Thread(()->audioLoop(),"oldy-round-audio");videoThread.start();audioThread.start();}catch(Exception error){recording=false;cleanup();file.delete();throw error;}
  }
- void frame(VideoFrame original){if(!recording)return;original.getBuffer().retain();VideoFrame f=new VideoFrame(original.getBuffer(),original.getRotation(),Math.max(0,System.nanoTime()-started));renderer.onFrame(f);f.release();}
+ void frame(VideoFrame original){EglRenderer sink=renderer;if(!recording||sink==null)return;original.getBuffer().retain();VideoFrame f=new VideoFrame(original.getBuffer(),original.getRotation(),Math.max(0,System.nanoTime()-started));try{sink.onFrame(f);}finally{f.release();}}
  synchronized void format(boolean v,MediaFormat f)throws IOException{if(v)videoTrack=mux.addTrack(f);else audioTrack=mux.addTrack(f);if(videoTrack>=0&&audioTrack>=0&&!muxStarted){mux.start();muxStarted=true;for(Packet p:pending)write(p);pending.clear();pendingBytes=0;}}
  synchronized void packet(boolean v,ByteBuffer buffer,MediaCodec.BufferInfo info)throws IOException{if(info.size==0||(info.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)!=0)return;byte[] bytes=new byte[info.size];buffer.position(info.offset);buffer.limit(info.offset+info.size);buffer.get(bytes);Packet p=new Packet(v,bytes,Math.max(0,info.presentationTimeUs),info.flags);if(muxStarted)write(p);else{pendingBytes+=bytes.length;if(pendingBytes>4*1024*1024)throw new IOException("Не удалось начать запись звука");pending.add(p);}}
  void write(Packet p){MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();info.set(0,p.bytes.length,p.pts,p.flags);mux.writeSampleData(p.video?videoTrack:audioTrack,ByteBuffer.wrap(p.bytes),info);if(p.video)videoSamples++;else audioSamples++;}

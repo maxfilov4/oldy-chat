@@ -73,6 +73,8 @@ jobs:
             build/video-results.txt
             build/update-results.txt
             build/capture-results.txt
+            build/channel-results.txt
+            build/capture-debug.log
             build/call-results.txt
             build/device-server.log
             build/test-turn.log

@@ -12,6 +12,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 ROOT = Path(os.environ.get('OLDY_DATA', '/var/lib/oldy-chat'))
 LOCK = threading.RLock()
@@ -22,12 +23,13 @@ TYPING = {}
 LIMITS = defaultdict(deque)
 NICK = re.compile(r'^[a-z0-9_]{3,24}$')
 DB = None
+CHANNEL_KEY = None
 MEDIA_JOBS = set()
 MEDIA_GATE = threading.BoundedSemaphore(1)
 MAX_BODY = 65536
 
 def init_db(path=None):
- global DB
+ global DB, CHANNEL_KEY
  ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
  DB = sqlite3.connect(str(path or ROOT/'accounts.sqlite3'), check_same_thread=False)
  DB.create_function('casefold',1,lambda value:str(value or '').casefold(),deterministic=True)
@@ -64,7 +66,15 @@ def init_db(path=None):
  CREATE INDEX IF NOT EXISTS deletion_owner ON deletions(owner,seq);
  CREATE TABLE IF NOT EXISTS signup_codes(ticket TEXT PRIMARY KEY,email TEXT NOT NULL,digest TEXT NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS media_garbage(id TEXT PRIMARY KEY);
- CREATE TABLE IF NOT EXISTS video_variants(id TEXT PRIMARY KEY,state TEXT NOT NULL,size INTEGER NOT NULL DEFAULT 0);""")
+ CREATE TABLE IF NOT EXISTS video_variants(id TEXT PRIMARY KEY,state TEXT NOT NULL,size INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS channel_history(seq INTEGER PRIMARY KEY AUTOINCREMENT,room TEXT NOT NULL,mid TEXT UNIQUE NOT NULL,thread TEXT NOT NULL,target TEXT NOT NULL,body BLOB NOT NULL);
+ CREATE INDEX IF NOT EXISTS channel_history_room ON channel_history(room,seq);""")
+ key_file=ROOT/'channel-history.key'
+ if not key_file.exists():
+  if DB.execute('SELECT 1 FROM channel_history LIMIT 1').fetchone():raise RuntimeError('Restore channel-history.key from the server backup')
+  with key_file.open('xb') as out:os.chmod(key_file,0o600);out.write(secrets.token_bytes(32));out.flush();os.fsync(out.fileno())
+ CHANNEL_KEY=key_file.read_bytes()
+ if len(CHANNEL_KEY)!=32:raise RuntimeError('Invalid channel history key')
  video_columns={r[1] for r in DB.execute('PRAGMA table_info(videos)')}
  for name,definition in [('kind',"TEXT NOT NULL DEFAULT 'creator'"),('recipient',"TEXT NOT NULL DEFAULT ''")]:
   if name not in video_columns:DB.execute('ALTER TABLE videos ADD COLUMN '+name+' '+definition)
@@ -125,7 +135,7 @@ def collect_media():
   for (vid,) in DB.execute('SELECT id FROM media_garbage').fetchall():
    if vid in MEDIA_JOBS:continue
    try:
-    for suffix in ('.part','.mp4','.compat.mp4','.compat.part.mp4'):(ROOT/'videos'/(vid+suffix)).unlink(missing_ok=True)
+    for suffix in ('.part','.mp4','.compat.mp4','.compat.part.mp4','.cover.jpg','.cover.part.jpg'):(ROOT/'videos'/(vid+suffix)).unlink(missing_ok=True)
     DB.execute('DELETE FROM media_garbage WHERE id=?',(vid,))
    except OSError:pass
   DB.commit()
@@ -152,6 +162,52 @@ def register_post(nick,data):
  else:DB.execute('INSERT INTO posts VALUES(?,?,?,?,?)',(mid,rid,nick,thread,vid))
  return mid
 
+def open_channel_record(rid,mid,encrypted):
+ return json.loads(AESGCM(CHANNEL_KEY).decrypt(encrypted[:12],encrypted[12:],('oldy-channel-v1:'+rid+':'+mid).encode()))
+
+def store_channel_history(nick,data):
+ raw=data.get('record');signature=data.get('signature')
+ if not isinstance(raw,str) or len(raw.encode())>48000 or not isinstance(signature,str) or len(signature)>160:raise Problem(400,'Неверная публикация')
+ try:
+  record=json.loads(raw)
+  if set(record)!={'v','id','room','from','time','payload'} or record['v']!=1 or record['from']!=nick:raise ValueError()
+  key=load_der_public_key(base64.b64decode(public_user(nick)['sig'],validate=True))
+  key.verify(base64.b64decode(signature,validate=True),('oldy-channel-v1\n'+raw).encode(),ec.ECDSA(hashes.SHA256()))
+ except Exception:raise Problem(400,'Подпись публикации не совпала')
+ rid=record['room'];mid=record['id'];body=record['payload']
+ if not isinstance(rid,str) or not isinstance(mid,str) or not re.fullmatch('[a-f0-9-]{36}',mid) or not isinstance(record['time'],int) or record['time']<1 or record['time']>time.time()*1000+300000:raise Problem(400,'Неверная публикация')
+ room=room_info(rid,nick)
+ if room['kind']!='channel':raise Problem(400,'Это не канал')
+ fields={'kind','text','room','thread','mime','size','name','sha256','sticker','reply','link','thumb','cloud_video','round','animated','cloud_blob','blob_key','blob_iv','op','mid','emoji'}
+ if not isinstance(body,dict) or set(body)-fields or body.get('room')!=rid or body.get('kind') not in ('text','file','sticker','control'):raise Problem(400,'Неверное содержимое')
+ thread=body.get('thread','');target=''
+ if not isinstance(thread,str) or thread and not re.fullmatch('[a-f0-9-]{36}',thread):raise Problem(400,'Неверные комментарии')
+ if gone(mid,rid,thread):raise Problem(410,'Публикация удалена')
+ existing=DB.execute('SELECT seq,body FROM channel_history WHERE mid=? AND room=?',(mid,rid)).fetchone()
+ if existing:
+  if open_channel_record(rid,mid,existing[1])['record']!=raw:raise Problem(409,'Публикация с этим номером уже существует')
+  return {'ok':True,'seq':existing[0]}
+ if body['kind']=='control':
+  target=body.get('mid','');op=body.get('op')
+  if not isinstance(target,str) or gone(target,rid):raise Problem(410,'Публикация удалена')
+  post=DB.execute('SELECT room,thread FROM posts WHERE mid=?',(target,)).fetchone()
+  if not post or post!=(rid,thread):raise Problem(404,'Публикация не найдена')
+  if op not in ('reaction','pin','unpin'):raise Problem(400,'Неверное действие')
+  if op in ('pin','unpin') and room['owner']!=nick:raise Problem(403,'Закрепляет владелец канала')
+  if op=='reaction' and body.get('emoji','') not in ('','👍','❤️','🔥','😂','🤯','🎮'):raise Problem(400,'Неизвестная реакция')
+ else:
+  if body['kind']=='file':
+   if not isinstance(body.get('size'),int) or not 0<body['size']<=2147483648 or not isinstance(body.get('sha256'),str) or not re.fullmatch('[a-fA-F0-9]{64}',body['sha256']):raise Problem(400,'Неверное вложение')
+   if body.get('cloud_video') and body.get('cloud_blob'):raise Problem(400,'Лишнее вложение')
+  register_post(nick,dict(mid=mid,room=rid,thread=thread,video=body.get('cloud_video',body.get('cloud_blob',''))))
+  if not thread:DB.execute('INSERT OR IGNORE INTO threads VALUES(?,?)',(rid,mid))
+ nonce=secrets.token_bytes(12);plain=json.dumps({'record':raw,'signature':signature},separators=(',',':')).encode()
+ encrypted=nonce+AESGCM(CHANNEL_KEY).encrypt(nonce,plain,('oldy-channel-v1:'+rid+':'+mid).encode())
+ try:cursor=DB.execute('INSERT INTO channel_history(room,mid,thread,target,body) VALUES(?,?,?,?,?)',(rid,mid,thread,target,encrypted))
+ except sqlite3.IntegrityError:DB.rollback();raise Problem(409,'Этот номер публикации занят')
+ DB.commit();COND.notify_all()
+ return {'ok':True,'seq':cursor.lastrowid}
+
 def delete_content(nick,rid,mid,whole=False):
  room=DB.execute('SELECT owner FROM rooms WHERE id=?',(rid,)).fetchone() if rid else None
  if whole:
@@ -166,6 +222,8 @@ def delete_content(nick,rid,mid,whole=False):
  affected=set(r[0] for r in DB.execute('SELECT nick FROM members WHERE room=?',(rid,))) if rid else {nick}
  selected=DB.execute('SELECT mid,video,author FROM posts WHERE room=?' if whole else 'SELECT mid,video,author FROM posts WHERE mid=? OR (room=? AND thread=?)',(rid,) if whole else (mid,rid,mid)).fetchall()
  mids={r[0] for r in selected};videos={r[1] for r in selected if r[1]};affected.update(r[2] for r in selected)
+ if rid:
+  mids.update(r[0] for r in DB.execute('SELECT mid FROM channel_history WHERE room=?' if whole else 'SELECT mid FROM channel_history WHERE room=? AND (mid=? OR thread=? OR target=?)',(rid,) if whole else (rid,mid,mid,mid)))
  # Includes legacy envelopes and received users' opaque self-snapshots with matching IDs.
  remove=[]
  for seq,owner,raw in DB.execute('SELECT seq,owner,envelope FROM archive').fetchall():
@@ -179,6 +237,7 @@ def delete_content(nick,rid,mid,whole=False):
   DB.execute('DELETE FROM archive WHERE mid=?',(message,))
   DB.execute('INSERT OR IGNORE INTO deleted_posts VALUES(?,?)',(message,rid))
   DB.execute('DELETE FROM posts WHERE mid=?',(message,))
+  DB.execute('DELETE FROM channel_history WHERE mid=?',(message,))
  DB.executemany('DELETE FROM archive WHERE seq=?',remove)
  for vid in videos:
   DB.execute('INSERT OR IGNORE INTO media_garbage VALUES(?)',(vid,));DB.execute('DELETE FROM videos WHERE id=?',(vid,));DB.execute('DELETE FROM video_variants WHERE id=?',(vid,))
@@ -195,6 +254,27 @@ def delete_content(nick,rid,mid,whole=False):
  collect_media()
  pending=any(DB.execute('SELECT 1 FROM media_garbage WHERE id=?',(vid,)).fetchone() for vid in videos)
  return {'ok':True,'kind':'room' if whole else 'post','room':rid,'mid':mid,'media_cleanup_pending':pending}
+
+def make_video_cover(vid):
+ dest=ROOT/'videos'/(vid+'.cover.jpg')
+ if dest.exists():return dest
+ if not shutil.which('ffmpeg'):raise Problem(503,'Обложка пока недоступна')
+ if not MEDIA_GATE.acquire(blocking=False):raise Problem(409,'Готовим обложку')
+ temporary=dest.with_name(vid+'.cover.part.jpg')
+ try:
+  with LOCK:
+   item=DB.execute('SELECT ready,kind FROM videos WHERE id=?',(vid,)).fetchone()
+   if not item or not item[0] or item[1]=='blob':raise Problem(404,'Видео недоступно')
+  for offset in ('1','0'):
+   command=['ffmpeg','-nostdin','-v','error','-threads','1','-ss',offset,'-i',str(ROOT/'videos'/(vid+'.mp4')),'-t','4','-an','-vf','thumbnail=30,scale=480:480:force_original_aspect_ratio=decrease','-frames:v','1','-threads','1','-q:v','4','-y',str(temporary)]
+   result=subprocess.run(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=25)
+   if result.returncode==0 and temporary.is_file() and 0<temporary.stat().st_size<250000:break
+  else:raise Problem(422,'Не удалось извлечь кадр видео')
+  with LOCK:
+   if not DB.execute('SELECT 1 FROM videos WHERE id=?',(vid,)).fetchone():raise Problem(404,'Видео удалено')
+   os.replace(temporary,dest)
+  return dest
+ finally:temporary.unlink(missing_ok=True);MEDIA_GATE.release()
 
 def compatible_video(vid):
  # One bounded, low-priority conversion. A delete revokes access immediately and cancels the worker.
@@ -485,6 +565,12 @@ class Handler(BaseHTTPRequestHandler):
      credential=base64.b64encode(hmac.new(secret.encode(),username.encode(),hashlib.sha1).digest()).decode()
      servers += [{'url':'turn:'+host+':3478?transport='+transport,'username':username,'credential':credential} for transport in ('udp','tcp')]
     return self.reply({'servers':servers,'relay':len(servers)>1,'expires_in':7200 if secret else 0})
+   if path.startswith('/video-cover/') and not post:
+    item=video_record(path[13:],nick)
+    if not item['ready'] or item['kind']=='blob':raise Problem(404,'Видео недоступно')
+    file=make_video_cover(item['id'])
+    video_record(item['id'],nick)
+    return self.reply({'photo':base64.b64encode(file.read_bytes()).decode()})
    if path=='/videos/start' and post:
     kind=str(data.get('kind','creator'));rid=str(data.get('room',''));recipient=str(data.get('recipient',''))
     room=room_info(rid,nick) if rid else None
@@ -704,6 +790,18 @@ class Handler(BaseHTTPRequestHandler):
     file=ROOT/'avatars'/(key+'.jpg')
     if not file.exists():raise Problem(404,'Фото не найдено')
     return self.reply({'photo':base64.b64encode(file.read_bytes()).decode()})
+   if path=='/channels/history/store' and post:
+    rate(('channel-history-store',nick),240,60)
+    with LOCK:result=store_channel_history(nick,data)
+    return self.reply(result)
+   if path=='/channels/history' and not post:
+    query=parse_qs(urlsplit(self.path).query);rid=query.get('room',[''])[0];after=max(0,int(query.get('after',['0'])[0]))
+    with LOCK:
+     room=room_info(rid,nick)
+     if room['kind']!='channel':raise Problem(400,'История публикаций доступна в канале')
+     rows=DB.execute('SELECT seq,mid,body FROM channel_history WHERE room=? AND seq>? ORDER BY seq LIMIT 20',(rid,after)).fetchall()
+     items=[dict(seq=seq,**open_channel_record(rid,mid,body)) for seq,mid,body in rows]
+    return self.reply({'items':items,'next':rows[-1][0] if rows else after,'more':len(rows)==20})
    if path=='/rooms' and not post:
     with LOCK:ids=[r[0] for r in DB.execute('SELECT room FROM members WHERE nick=?',(nick,))]
     return self.reply({'rooms':[room_info(r,nick) for r in ids]})
