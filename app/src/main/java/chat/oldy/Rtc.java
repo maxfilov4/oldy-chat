@@ -17,11 +17,11 @@ final class Rtc {
  static final ConcurrentHashMap<String,String> status=new ConcurrentHashMap<>();
  Rtc(Context c,Vault v,Signal s){this(c,v,s,Collections.singletonList(PeerConnection.IceServer.builder("stun:5.42.102.11:3478").createIceServer()));}
  Rtc(Context c,Vault v,Signal s,java.util.List<PeerConnection.IceServer> ice){context=c;vault=v;signal=s;iceServers=ice;PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(c).setEnableInternalTracer(false).createInitializationOptions());factory=PeerConnectionFactory.builder().createPeerConnectionFactory();}
- void request(JSONObject m){io.execute(()->{try{String mid=m.getString("id"),from=m.getString("from");if(m.has("local"))return;wanted.put(mid,from);status.put(mid,"Соединяем телефоны…");signal.send(from,new JSONObject().put("op","request").put("mid",mid));io.schedule(()->{if(wanted.remove(mid)!=null){status.put(mid,"Нет прямого соединения. Попробуйте Wi-Fi и откройте чат на обоих телефонах.");ChatService.changed(context);}},65,TimeUnit.SECONDS);}catch(Exception e){status.put(m.optString("id"),Api.message(e));}ChatService.changed(context);});}
+ void request(JSONObject m){io.execute(()->{try{String mid=m.getString("id"),from=m.getString("from");if(m.has("local"))return;wanted.put(mid,from);status.put(mid,"Соединяем телефоны…");signal.send(from,new JSONObject().put("op","request").put("mid",mid).put("room",Conversation.community(m.optString("peer"))?Conversation.room(m.optString("peer")):""));io.schedule(()->{if(wanted.remove(mid)!=null){status.put(mid,"Нет прямого соединения. Попробуйте Wi-Fi и откройте чат на обоих телефонах.");ChatService.changed(context);}},65,TimeUnit.SECONDS);}catch(Exception e){status.put(m.optString("id"),Api.message(e));}ChatService.changed(context);});}
  void accept(String peer,JSONObject p){io.execute(()->{try{
   String op=p.getString("op"),mid=p.getString("mid");if(!mid.matches("[a-f0-9-]{36}"))return;
   if(op.equals("request")){
-   JSONObject m=vault.message(mid);if(m==null||!m.optBoolean("out")||!m.optString("peer").equals(peer)||!m.has("local")||!m.optString("kind").equals("file"))return;
+   JSONObject m=vault.message(mid);if(m==null||!m.optBoolean("out")||!mayReceive(m,peer)||!m.has("local")||!m.optString("kind").equals("file"))return;
    if(sessions.size()>=3)return;for(Session x:sessions.values())if(x.mid.equals(mid)&&x.peer.equals(peer))return;
    String sid=UUID.randomUUID().toString();Session x=new Session(sid,peer,m,true);sessions.put(sid,x);x.connect();x.channel(x.pc.createDataChannel("oldy-file",new DataChannel.Init()));x.pc.createOffer(x.creator("offer"),new MediaConstraints());
   }else{
@@ -32,6 +32,7 @@ final class Rtc {
    }else if(x!=null&&x.peer.equals(peer)&&x.mid.equals(mid)&&op.equals("answer"))x.remote("answer",p.getString("sdp"));
   }
  }catch(Exception e){status.put(p.optString("mid"),Api.message(e));ChatService.changed(context);}});}
+ boolean mayReceive(JSONObject m,String peer)throws Exception{String target=m.optString("peer");if(!Conversation.community(target))return target.equals(peer)&&!vault.isBlocked(peer);JSONObject room=vault.room(Conversation.room(target));if(room==null)return false;JSONArray a=room.getJSONArray("members");for(int i=0;i<a.length();i++)if(peer.equals(a.optString(i)))return true;return false;}
  void close(){io.execute(()->{for(Session s:new ArrayList<>(sessions.values()))s.finish(false,"Передача остановлена");factory.dispose();});io.shutdown();}
  class Session {
   final String sid,peer,mid;final JSONObject m;final boolean sending;PeerConnection pc;DataChannel dc;InputStream input;MediaFiles.Writer output;boolean ended,sentSdp;String sdpType;long received,last=System.currentTimeMillis();
@@ -58,7 +59,7 @@ final class Rtc {
    public void onCreateSuccess(SessionDescription s){io.execute(()->{if(ended)return;sdpType=type;pc.setLocalDescription(new SdpObserver(){public void onSetSuccess(){io.schedule(()->sendSdp(),8,TimeUnit.SECONDS);}public void onSetFailure(String x){io.execute(()->finish(false,"Не удалось соединить телефоны"));}public void onCreateSuccess(SessionDescription s){}public void onCreateFailure(String s){}},s);});}
    public void onCreateFailure(String s){io.execute(()->finish(false,"Не удалось соединить телефоны"));}public void onSetSuccess(){}public void onSetFailure(String s){}
   };}
-  void sendSdp(){if(ended||sentSdp||sdpType==null||pc.getLocalDescription()==null)return;try{String s=pc.getLocalDescription().description;if(s.length()>14000)throw new IOException();signal.send(peer,new JSONObject().put("op",sdpType).put("mid",mid).put("sid",sid).put("sdp",s));sentSdp=true;}catch(Exception e){finish(false,"Не удалось отправить запрос передачи");}}
+  void sendSdp(){if(ended||sentSdp||sdpType==null||pc.getLocalDescription()==null)return;try{String s=pc.getLocalDescription().description;if(s.length()>14000)throw new IOException();signal.send(peer,new JSONObject().put("op",sdpType).put("mid",mid).put("sid",sid).put("sdp",s).put("room",Conversation.community(m.optString("peer"))?Conversation.room(m.optString("peer")):""));sentSdp=true;}catch(Exception e){finish(false,"Не удалось отправить запрос передачи");}}
   void remote(String type,String sdp){if(sdp.length()>14000)return;pc.setRemoteDescription(new SdpObserver(){public void onSetSuccess(){if(type.equals("offer"))io.execute(()->pc.createAnswer(creator("answer"),new MediaConstraints()));}public void onSetFailure(String s){io.execute(()->finish(false,"Не удалось соединить телефоны"));}public void onCreateSuccess(SessionDescription s){}public void onCreateFailure(String s){}},new SessionDescription(type.equals("offer")?SessionDescription.Type.OFFER:SessionDescription.Type.ANSWER,sdp));}
   void channel(DataChannel d){if(ended){d.close();return;}dc=d;dc.registerObserver(new DataChannel.Observer(){
    public void onBufferedAmountChange(long amount){}

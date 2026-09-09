@@ -48,7 +48,9 @@ jobs:
           script: bash tools/smoke.sh
       - name: Package installer
         if: always()
-        run: python3 tools/package-installer.py
+        run: |
+          python3 tools/package-installer.py
+          python3 tools/package-release.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -56,6 +58,10 @@ jobs:
           path: |
             build/OldyChat-beta.apk
             build/Install-OldyChat.txt
+            build/OldyChat-0.3-server.tar.gz
+            build/release/release.json
+            build/design-results.txt
+            build/video-results.txt
             build/screenshots
             build/android-errors.log
             build/crypto-results.txt

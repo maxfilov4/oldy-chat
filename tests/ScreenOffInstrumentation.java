@@ -21,7 +21,8 @@ public class ScreenOffInstrumentation extends Instrumentation {
   String mid=java.util.UUID.randomUUID().toString();JSONObject e=Crypto.encrypt("screen_test","alice","Сообщение при выключенном экране",mid,System.currentTimeMillis(),identity,alice);
   JSONObject delivered=null;long until=System.currentTimeMillis()+12000;
   while(delivered==null){try{delivered=api.call("/send",e,registered.getString("token"));}catch(Api.Failure offline){if(offline.status!=409||System.currentTimeMillis()>=until)throw offline;Thread.sleep(700);}}
-  if(!delivered.optBoolean("delivered")||!v.has(mid))throw new Exception("No delivery with screen off");
+  while(!v.has(mid)&&System.currentTimeMillis()<until)Thread.sleep(150);
+  if(!delivered.optBoolean("stored")||!v.has(mid))throw new Exception("No delivery with screen off");Thread.sleep(300);
   boolean found=false;for(android.service.notification.StatusBarNotification n:getTargetContext().getSystemService(NotificationManager.class).getActiveNotifications())if(n.getId()=="screen_test".hashCode())found=true;
   if(!found)throw new Exception("No message notification with screen off");
   out.putString("stream","OLDY_SCREEN_OFF_PASS: actual encrypted message delivered to foreground service and notification posted while display off with battery exemption\n");finish(-1,out);

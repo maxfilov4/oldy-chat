@@ -68,5 +68,12 @@ for node in ET.fromstring(s).iter('node'):
   assert r-x>100 and b-y>25, ('Message is not visibly laid out',node.attrib)
 print('PASS: encrypted history restored and conversation rendered')
 PY
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.DesignInstrumentation > build/design-results.txt
+cat build/design-results.txt
+grep -q 'OLDY_DESIGN_PASS' build/design-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.VideoInstrumentation > build/video-results.txt
+cat build/video-results.txt
+grep -q 'OLDY_VIDEO_PASS' build/video-results.txt
+adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi

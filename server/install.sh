@@ -4,6 +4,18 @@ set -euo pipefail
 if [[ $(id -u) != 0 ]]; then echo 'Run this installer as root.'; exit 1; fi
 oldy_src="$(cd "$(dirname "$0")" && pwd)"
 if [[ ! -f "$oldy_src/server.py" ]]; then echo 'server.py is missing'; exit 1; fi
+python3 -m py_compile "$oldy_src/server.py"
+# Make a consistent SQLite snapshot before an additive migration.
+oldy_backup="/var/backups/oldy-chat/$(date -u +%Y%m%d-%H%M%S)"
+install -d -m 700 "$oldy_backup"
+if [[ -f /opt/oldy-chat/server.py ]]; then cp /opt/oldy-chat/server.py "$oldy_backup/server.py"; fi
+OLDY_BACKUP_DIR="$oldy_backup" python3 - <<'PYBACKUP'
+import sqlite3,os
+from pathlib import Path
+source=Path('/var/lib/oldy-chat/accounts.sqlite3')
+if source.exists():
+ with sqlite3.connect(source) as src,sqlite3.connect(Path(os.environ['OLDY_BACKUP_DIR'])/'accounts.sqlite3') as dst:src.backup(dst)
+PYBACKUP
 if ss -H -ltnp '( sport = :443 )' | grep -q .; then
  oldy_pid=$(systemctl show oldy-chat --property MainPID --value 2>/dev/null || true)
  if [[ -z "$oldy_pid" || "$oldy_pid" == 0 ]] || ! ss -H -ltnp '( sport = :443 )' | grep -q "pid=$oldy_pid,"; then
@@ -28,6 +40,17 @@ if [[ ! -f /etc/oldy-chat/server.crt ]]; then
 fi
 chown root:oldy-chat /etc/oldy-chat/server.key /etc/oldy-chat/server.crt
 chmod 640 /etc/oldy-chat/server.key /etc/oldy-chat/server.crt
+python3 - <<'PYOWNER'
+import sqlite3,hashlib,os
+from pathlib import Path
+source=Path('/var/lib/oldy-chat/accounts.sqlite3');config=Path('/etc/oldy-chat/owner.env')
+if source.exists() and not config.exists():
+ with sqlite3.connect(source) as db:
+  row=db.execute("SELECT sig FROM users WHERE nick='oldy'").fetchone()
+ if row:
+  config.write_text('OLDY_OWNER_NICK=oldy\nOLDY_OWNER_KEY_HASH='+hashlib.sha256(row[0].encode()).hexdigest()+'\n');config.chmod(0o600)
+ else:print('Creator video uploads disabled: established @oldy account not found.')
+PYOWNER
 cat > /etc/systemd/system/oldy-chat.service <<'UNIT'
 [Unit]
 Description=Oldy Chat encrypted relay
@@ -38,6 +61,8 @@ Wants=network-online.target
 User=oldy-chat
 Group=oldy-chat
 Environment=OLDY_DATA=/var/lib/oldy-chat
+EnvironmentFile=-/etc/oldy-chat/owner.env
+EnvironmentFile=-/etc/oldy-chat/mail.env
 ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key --also-443
 Restart=on-failure
 RestartSec=5
@@ -56,6 +81,18 @@ TasksMax=120
 [Install]
 WantedBy=multi-user.target
 UNIT
+if [[ -f "$oldy_src/OldyChat-latest.apk" && -f "$oldy_src/release.json" ]]; then
+ OLDY_RELEASE_DIR="$oldy_src" python3 - <<'PYRELEASE'
+import hashlib,json,os,shutil
+from pathlib import Path
+src=Path(os.environ['OLDY_RELEASE_DIR']);apk=src/'OldyChat-latest.apk';info=json.loads((src/'release.json').read_text())
+if info['package']!='chat.oldy' or info['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or info['size']!=apk.stat().st_size:raise SystemExit('Release verification failed')
+dest=Path('/var/lib/oldy-chat/releases');dest.mkdir(mode=0o755,exist_ok=True)
+for name in ['OldyChat-latest.apk','release.json']:
+ temporary=dest/(name+'.new');shutil.copyfile(src/name,temporary);temporary.chmod(0o644);os.replace(temporary,dest/name)
+print('APK installed for in-app updates:',info['version_name'])
+PYRELEASE
+fi
 systemctl daemon-reload
 systemctl enable --now oldy-chat
 systemctl restart oldy-chat
@@ -113,4 +150,4 @@ echo
 echo 'OLDY CHAT: SERVER READY'
 echo 'HTTPS 443 ready; 8443 kept for existing phones.'
 openssl x509 -in /etc/oldy-chat/server.crt -noout -fingerprint -sha256
-echo 'OLDY CHAT 0.2: UPDATE COMPLETE. Install the new APK on both phones.'
+echo 'OLDY CHAT 0.3: UPDATE COMPLETE. Install the new APK on both phones.'

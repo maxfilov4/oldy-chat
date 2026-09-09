@@ -26,7 +26,7 @@ public class CryptoInstrumentation extends Instrumentation {
    Thread.sleep(300);
    Future<JSONObject> send=pool.submit(()->api.call("/send",e,a.getString("token")));
    JSONObject got=receive.get(25,TimeUnit.SECONDS).getJSONArray("messages").getJSONObject(0);require(Crypto.decrypt(got,bob,alice).equals(plain),"TLS relay roundtrip");
-   api.call("/ack",new JSONObject().put("from","alice").put("id",e.getString("id")),b.getString("token"));require(send.get(25,TimeUnit.SECONDS).getBoolean("delivered"),"Delivery acknowledgement");
+   api.call("/ack",new JSONObject().put("from","alice").put("id",e.getString("id")),b.getString("token"));require(send.get(25,TimeUnit.SECONDS).getBoolean("stored"),"Durable storage acknowledgement");require(api.call("/receipts",new JSONObject().put("ids",new JSONArray().put(e.getString("id"))),a.getString("token")).getJSONArray("delivered").length()==1,"Recipient acknowledgement");
   }finally{pool.shutdownNow();}
   api.configure("https://10.0.2.2:8444",new String(new char[64]).replace('\0','0'));rejected=false;try{api.call("/me",null,a.getString("token"));}catch(Exception expected){rejected=true;}require(rejected,"Wrong certificate pin accepted");
   // Emulator-only fixtures for testing real activity layouts and encrypted persistence.

@@ -4,4 +4,6 @@
  <instrumentation android:name="chat.oldy.CryptoInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.FeatureInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.ScreenOffInstrumentation" android:targetPackage="chat.oldy"/>
+ <instrumentation android:name="chat.oldy.DesignInstrumentation" android:targetPackage="chat.oldy"/>
+<instrumentation android:name="chat.oldy.VideoInstrumentation" android:targetPackage="chat.oldy" />
 </manifest>
