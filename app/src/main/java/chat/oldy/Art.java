@@ -24,7 +24,7 @@ final class Art extends View {
    int sw=mascot.getWidth()/4,sh=mascot.getHeight()/2;Rect source=new Rect((frame%4)*sw,(frame/4)*sh,(frame%4+1)*sw,(frame/4+1)*sh);float width=Math.min(w*.67f,h*(float)sw/sh);float x=Math.min(left,w-width);c.save();if(backwards)c.scale(-1,1,x+width/2,h/2);c.drawBitmap(mascot,source,new RectF(x,0,x+width,h),p);c.restore();
    if(phase>=13&&phase<17){p.setColor(0xff83b8ee);p.setStrokeWidth(Math.max(1,w*.012f));p.setStyle(Paint.Style.STROKE);Path scribble=new Path();float start=w*.66f,yy=h*.35f;scribble.moveTo(start,yy);int steps=(int)((phase-13)*10)%20;for(int i=0;i<steps;i++)scribble.lineTo(start+i*w*.012f,yy+(float)Math.sin(i*2.7f)*h*.02f+(i/7)*h*.08f);c.drawPath(scribble,p);p.setStyle(Paint.Style.FILL);}
   }else if(type==0&&avatars!=null&&!key.startsWith("photo:")){
-   int cell=avatars.getWidth()/4;int cy=(int)((index/4+.5f)*avatars.getHeight()/3);Rect src=new Rect((index%4)*cell,cy-cell/2,(index%4+1)*cell,cy+cell/2);c.drawBitmap(avatars,src,new RectF(0,0,w,h),p);
+   int cell=avatars.getWidth()/4;float[] centers={.170f,.480f,.793f};int cy=(int)(centers[index/4]*avatars.getHeight());Rect src=new Rect((index%4)*cell,cy-cell/2,(index%4+1)*cell,cy+cell/2);c.drawBitmap(avatars,src,new RectF(0,0,w,h),p);
   }else if(key.startsWith("photo:")){
    if(photo==null)photo=photos.get(key);
    if(photo!=null){float scale=Math.max(w/photo.getWidth(),h/photo.getHeight());float bw=photo.getWidth()*scale,bh=photo.getHeight()*scale;c.drawBitmap(photo,null,new RectF((w-bw)/2,(h-bh)/2,(w+bw)/2,(h+bh)/2),p);}

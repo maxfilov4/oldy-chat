@@ -19,7 +19,7 @@ adb exec-out screencap -p > build/screenshots/01-login.png
 adb install -r build/OldyChat-tests.apk
 python3 tests/device-server.py > build/device-server.log 2>&1 &
 server_pid=$!
-trap 'adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" 2>/dev/null || true' EXIT
+trap 'adb logcat -d -s AndroidRuntime:E MediaPlayer:E > build/android-errors.log; adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/ >/dev/null 2>&1 || true; kill "$server_pid" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 30); do
  if [[ -f build/device-server/pin.txt ]]; then break; fi
  sleep 1
