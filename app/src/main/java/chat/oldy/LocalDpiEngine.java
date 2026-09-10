@@ -13,10 +13,11 @@ final class LocalDpiEngine implements Closeable {
   endpoint=new File(dir,"data.sock");protection=new File(dir,"protect.sock");endpoint.delete();protection.delete();
   try{
    listener=new LocalSocket();listener.bind(new LocalSocketAddress(protection.getAbsolutePath(),LocalSocketAddress.Namespace.FILESYSTEM));protector=new LocalServerSocket(listener.getFileDescriptor());workers.execute(this::accept);
-   String mode=Notices.prefs(s).getString("youtube_dpi_strategy","auto");List<String> command=new ArrayList<>(Arrays.asList(new File(s.getApplicationInfo().nativeLibraryDir,"liboldi_dpi.so").getAbsolutePath(),"--ip","127.0.0.1","--no-domain","--no-udp","--max-conn","96","--timeout","4","--cache-ttl","600","--protect-path",protection.getAbsolutePath(),"--debug","0"));
+   String mode=s.strategy;List<String> command=new ArrayList<>(Arrays.asList(new File(s.getApplicationInfo().nativeLibraryDir,"liboldi_dpi.so").getAbsolutePath(),"--ip","127.0.0.1","--no-domain","--no-udp","--max-conn","96","--timeout","4","--cache-ttl","600","--protect-path",protection.getAbsolutePath(),"--debug","0"));
    if(mode.equals("disorder"))Collections.addAll(command,"--disorder","1","--tlsrec","1+s");
    else if(mode.equals("split"))Collections.addAll(command,"--split","1+s","--tlsrec","1+s");
-   else Collections.addAll(command,"--tlsrec","1+s","--split","1+s","--auto","torst,ssl_err","--disorder","1","--tlsrec","1+s","--auto","torst,ssl_err","--split","2");
+   else if(mode.equals("fake4")||mode.equals("fake8"))Collections.addAll(command,"--fake","-1","--ttl",mode.equals("fake4")?"4":"8");
+   else Collections.addAll(command,"--tlsrec","1+s","--split","1+s","--auto","torst,ssl_err","--disorder","1","--tlsrec","1+s","--auto","torst,ssl_err","--split","2","--auto","torst,ssl_err","--fake","-1","--ttl","4","--auto","torst,ssl_err","--fake","-1","--ttl","8");
    ProcessBuilder builder=new ProcessBuilder(command);builder.environment().remove("SS_PLUGIN_OPTIONS");builder.environment().remove("SS_LOCAL_PORT");builder.environment().put("OLDI_DPI_SOCKET",endpoint.getAbsolutePath());builder.redirectOutput(new File("/dev/null"));builder.redirectError(new File("/dev/null"));process=builder.start();
    long until=SystemClock.elapsedRealtime()+4000;while(!endpoint.exists()&&process.isAlive()&&SystemClock.elapsedRealtime()<until)Thread.sleep(25);
    if(!endpoint.exists()||!process.isAlive())throw new IOException("DPI_START_FAILED");

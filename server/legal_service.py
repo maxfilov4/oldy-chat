@@ -6,7 +6,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 VERSION='2026-09-10.1'
 REASONS=('spam','harassment','violence','sexual_content','child_safety','impersonation','copyright','other')
-UGC={'/send','/room/create','/room/update','/profile','/posts/register','/channels/history/store','/videos/start','/videos/cover','/videos/finish','/blobs/create','/blobs/finish','/stickers/offers'}
+UGC={'/send','/room/create','/room/update','/profile','/posts/register','/channels/history/store','/videos/start','/videos/cover','/videos/finish','/blobs/create','/blobs/finish','/stickers/offers','/stickers/generate'}
 
 def init(s):
  s.DB.executescript('''CREATE TABLE IF NOT EXISTS agreements(nick TEXT PRIMARY KEY,version TEXT NOT NULL,accepted_at INTEGER NOT NULL);
@@ -63,7 +63,7 @@ def remove_account(s,nick,journal=True):
  for table in ('blocks',):s.DB.execute('DELETE FROM '+table+' WHERE owner=? OR target=?',(nick,nick))
  s.DB.execute('DELETE FROM abuse_reports WHERE reporter=? OR target=?',(nick,nick))
  s.DB.execute('DELETE FROM chat_clears WHERE owner=? OR peer=?',(nick,nick))
- for table in ('archive','sticker_offers','hidden_messages','deletions'):s.DB.execute('DELETE FROM '+table+' WHERE owner=?',(nick,))
+ for table in ('archive','sticker_offers','sticker_jobs','hidden_messages','deletions'):s.DB.execute('DELETE FROM '+table+' WHERE owner=?',(nick,))
  s.DB.execute("DELETE FROM handles WHERE kind='user' AND ref=?",(nick,))
  # Registration sequence stays monotonic without retaining the old handle.
  s.DB.execute("UPDATE account_numbers SET nick='deleted:'||number WHERE nick=?",(nick,));s.DB.execute('DELETE FROM users WHERE nick=?',(nick,))

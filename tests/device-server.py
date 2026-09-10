@@ -22,6 +22,14 @@ class TestHandler(relay.Handler):
   return super().reply(obj,status)
  def do_POST(self):
   global call_peer
+  if self.path=='/test-sticker/enable':
+   nick=self.user()
+   import sticker_generation
+   from sticker_fixture import sheet
+   os.environ['OLDY_STICKER_OPENAI_KEY']='fixture-only-not-a-real-key'
+   os.environ['OLDY_STICKER_USERS']=nick
+   sticker_generation.render_sheet=lambda photo,action:sheet()
+   return self.reply({'provider':'test-fixture','live_ai_test':False})
   if self.path=='/test-call/start':
    if call_peer is None:
     from call_peer import CallPeer

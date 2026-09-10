@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from disk_storage import YandexDisk,DiskError
 import legal_service
+import sticker_generation
 from types import SimpleNamespace
 def legal_context():return SimpleNamespace(**globals())
 from cryptography.hazmat.primitives.serialization import load_der_public_key
@@ -47,6 +48,7 @@ def init_db(path=None):
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
  DB.execute('CREATE TABLE IF NOT EXISTS contact_discovery(nick TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0)')
+ sticker_generation.init(legal_context())
  DB.execute('CREATE TABLE IF NOT EXISTS sticker_offers(id TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT NOT NULL,price_minor INTEGER NOT NULL,currency TEXT NOT NULL,asset BLOB NOT NULL,created_at INTEGER NOT NULL)')
  DB.executescript('''CREATE TABLE IF NOT EXISTS profiles(nick TEXT PRIMARY KEY, avatar TEXT NOT NULL DEFAULT 'preset:0', bio TEXT NOT NULL DEFAULT '');
  CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, avatar TEXT NOT NULL);
@@ -668,7 +670,7 @@ class Handler(BaseHTTPRequestHandler):
     if self.headers.get('Transfer-Encoding'):raise Problem(400,'Unsupported request')
     try:n=int(self.headers.get('Content-Length','0'))
     except ValueError:raise Problem(400,'Invalid length')
-    if n<0 or n>(1600000 if path=='/videos/cover' else 750000 if path in ('/profile','/room/update','/stickers/offers') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
+    if n<0 or n>(1600000 if path in ('/videos/cover','/stickers/generate') else 750000 if path in ('/profile','/room/update','/stickers/offers') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
     try:data=json.loads(self.rfile.read(n))
     except Exception:raise Problem(400,'Некорректный JSON')
     if not isinstance(data,dict):raise Problem(400,'Некорректный запрос')
@@ -784,6 +786,8 @@ class Handler(BaseHTTPRequestHandler):
    legal_result=legal_service.api(legal_context(),self,path,post,data,nick)
    if legal_result is not None:return self.reply(legal_result)
    if post:legal_service.require(legal_context(),nick,path)
+   generated=sticker_generation.api(legal_context(),path,post,data,nick)
+   if generated is not None:return self.reply(generated)
    if path=='/call-config' and post:
     peer=str(data.get('peer',''));public_user(peer)
     if peer==nick:raise Problem(400,'Выберите другого участника')
@@ -1323,7 +1327,7 @@ def main():
  p=argparse.ArgumentParser();p.add_argument('--host',default='0.0.0.0');p.add_argument('--port',type=int,default=8443);p.add_argument('--cert');p.add_argument('--key');p.add_argument('--test-http',action='store_true');p.add_argument('--also-443',action='store_true');a=p.parse_args()
  if a.test_http and a.host not in ('127.0.0.1','::1'):p.error('Test HTTP is localhost-only')
  if not a.test_http and not(a.cert and a.key):p.error('TLS certificate and key required')
- init_db();threading.Thread(target=legal_service.maintenance,args=(legal_context(),),daemon=True).start();srv=Relay((a.host,a.port),Handler)
+ init_db();threading.Thread(target=sticker_generation.maintenance,args=(legal_context(),),daemon=True).start();threading.Thread(target=legal_service.maintenance,args=(legal_context(),),daemon=True).start();srv=Relay((a.host,a.port),Handler)
  if DISK is not None:threading.Thread(target=storage_worker,daemon=True).start()
  if not a.test_http:
   tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2;tls.load_cert_chain(a.cert,a.key);srv.tls=tls
