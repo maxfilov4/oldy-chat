@@ -8,7 +8,7 @@ for attempt in range(5):
  raw=subprocess.run(['adb','shell','cat','/sdcard/oldy-ui.xml'],capture_output=True,text=True).stdout
  if raw.lstrip().startswith('<?xml'):
   nodes=list(ET.fromstring(raw).iter('node'))
-  launcher=any(n.get('text','') in ("Quickstep isn't responding", "System UI isn't responding") and n.get('package')=='android' for n in nodes)
+  launcher=any(n.get('text','') in ("Quickstep isn't responding", "System UI isn't responding", "Process system isn't responding") and n.get('package')=='android' for n in nodes)
   if launcher:
    close=next(n for n in nodes if n.get('resource-id')=='android:id/aerr_close')
    x,y,r,b=map(int,re.findall(r'\d+',close.get('bounds')))
