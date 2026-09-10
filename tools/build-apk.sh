@@ -5,6 +5,7 @@ if [[ ! -f .keys/beta.jks ]]; then
  echo 'Restore the existing owner signing key; an update must keep its original identity.' >&2
  exit 1
 fi
+bash tools/prepare-tunnel.sh
 gradle --no-daemon :app:assembleRelease :app:assembleReleaseAndroidTest
 mkdir -p build
 cp app/build/outputs/apk/release/app-release.apk build/OldyChat-beta.apk

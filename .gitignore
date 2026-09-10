@@ -3,6 +3,9 @@ build/
 *.jks
 *.keystore
 local.properties
+.native/
+app/src/main/jniLibs/
+app/src/main/assets/third-party/
 __pycache__/
 *.sqlite3*
 *.pem

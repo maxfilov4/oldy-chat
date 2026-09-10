@@ -4,7 +4,7 @@ import android.content.*;import android.net.Uri;import org.json.*;import java.io
 final class CloudMedia {
  static void attach(MainActivity a,Uri uri,String mime,String name,String target,String caption)throws Exception{attach(a,uri,mime,name,target,caption,null);}
  static void attach(MainActivity a,Uri uri,String mime,String name,String target,String caption,JSONObject extra)throws Exception{
-  Vault vault=a.vault;String vid="";boolean queued=false;JSONObject body=MediaFiles.importFile(a,uri,mime,name);String key=body.getString("local");if(extra!=null)for(String field:new String[]{"duration","waveform"})if(extra.has(field))body.put(field,extra.get(field));
+  Vault vault=a.vault;String vid="";boolean queued=false;JSONObject body=MediaFiles.importFile(a,uri,mime,name);String key=body.getString("local");if(extra!=null)for(String field:new String[]{"duration","waveform","custom_sticker","sticker_id","sticker_author"})if(extra.has(field))body.put(field,extra.get(field));
   try{
    byte[] plain=MediaFiles.bytes(a,key),aes=Crypto.random(32),iv=Crypto.random(12);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(aes,"AES"),new GCMParameterSpec(128,iv));byte[] encrypted=c.doFinal(plain);Arrays.fill(plain,(byte)0);
    vid=upload(a.api,vault,target,encrypted,"blob");body.put("cloud_blob",vid).put("blob_key",Crypto.b64(aes)).put("blob_iv",Crypto.b64(iv)).put("text",caption);Arrays.fill(aes,(byte)0);

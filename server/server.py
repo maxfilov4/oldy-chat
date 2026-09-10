@@ -44,6 +44,7 @@ def init_db(path=None):
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
  DB.execute('CREATE TABLE IF NOT EXISTS contact_discovery(nick TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0)')
+ DB.execute('CREATE TABLE IF NOT EXISTS sticker_offers(id TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT NOT NULL,price_minor INTEGER NOT NULL,currency TEXT NOT NULL,asset BLOB NOT NULL,created_at INTEGER NOT NULL)')
  DB.executescript('''CREATE TABLE IF NOT EXISTS profiles(nick TEXT PRIMARY KEY, avatar TEXT NOT NULL DEFAULT 'preset:0', bio TEXT NOT NULL DEFAULT '');
  CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, avatar TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS members(room TEXT NOT NULL, nick TEXT NOT NULL, PRIMARY KEY(room,nick));''')
@@ -201,8 +202,9 @@ def store_channel_history(nick,data):
  if not isinstance(rid,str) or not isinstance(mid,str) or not re.fullmatch('[a-f0-9-]{36}',mid) or not isinstance(record['time'],int) or record['time']<1 or record['time']>time.time()*1000+300000:raise Problem(400,'Неверная публикация')
  room=room_info(rid,nick)
  if room['kind']!='channel':raise Problem(400,'Это не канал')
- fields={'kind','text','room','thread','mime','size','name','sha256','sticker','reply','link','thumb','cloud_video','round','animated','cloud_blob','blob_key','blob_iv','duration','waveform','op','mid','emoji'}
+ fields={'kind','text','room','thread','mime','size','name','sha256','sticker','reply','link','thumb','cloud_video','round','animated','cloud_blob','blob_key','blob_iv','duration','waveform','custom_sticker','sticker_id','sticker_author','op','mid','emoji'}
  if not isinstance(body,dict) or set(body)-fields or body.get('room')!=rid or body.get('kind') not in ('text','file','sticker','control'):raise Problem(400,'Неверное содержимое')
+ if body.get('custom_sticker') and (body.get('kind')!='file' or body.get('mime')!='image/webp' or type(body.get('size')) is not int or not 1<=body['size']<=350000 or not isinstance(body.get('sticker_id'),str) or not re.fullmatch('[a-f0-9-]{36}',body['sticker_id']) or body.get('sticker_author')!=nick):raise Problem(400,'Неверный авторский стикер')
  if 'duration' in body and (not isinstance(body['duration'],int) or not 0<=body['duration']<=86400000):raise Problem(400,'Неверная длительность')
  if 'waveform' in body:
   try:
@@ -442,6 +444,45 @@ def storage_worker():
   time.sleep(20)
 
 
+YOUTUBE_ROOTS=('youtube.com','youtube-nocookie.com','youtu.be','googlevideo.com','ytimg.com','youtubei.googleapis.com','youtube.googleapis.com','ggpht.com')
+def youtube_network_config():
+ default={'version':1,'enabled':True,'tcp_no_delay':True,'domains':list(YOUTUBE_ROOTS)}
+ path=ROOT/'youtube-rules.json'
+ if not path.exists():return default
+ try:
+  if path.stat().st_size>8192:raise ValueError()
+  config=json.loads(path.read_text())
+  if set(config)-{'version','enabled','tcp_no_delay','domains'} or type(config.get('version')) is not int or config['version']<1 or type(config.get('enabled')) is not bool or type(config.get('tcp_no_delay',True)) is not bool or not isinstance(config.get('domains'),list) or not 1<=len(config['domains'])<=len(YOUTUBE_ROOTS) or any(d not in YOUTUBE_ROOTS for d in config['domains']):raise ValueError()
+  return config
+ except Exception:return default
+
+def save_sticker_offer(nick,data):
+ rate(('sticker-offer',nick),30,3600)
+ if set(data)!={'id','title','image','price_minor','currency','rights_confirmed'} or data.get('rights_confirmed') is not True:raise Problem(400,'Подтвердите права на изображение')
+ sid=data['id'];title=data['title'];amount=data['price_minor']
+ if not isinstance(sid,str) or not re.fullmatch('[a-f0-9-]{36}',sid) or not isinstance(title,str) or not 1<=len(title.strip())<=40 or type(amount) is not int or not 100<=amount<=10000000 or data['currency']!='RUB':raise Problem(400,'Неверное предложение или цена')
+ with LOCK:
+  current=DB.execute('SELECT owner FROM sticker_offers WHERE id=?',(sid,)).fetchone()
+  if current and current[0]!=nick:raise Problem(403,'Предложение принадлежит другому автору')
+  if not current and DB.execute('SELECT COUNT(*) FROM sticker_offers WHERE owner=?',(nick,)).fetchone()[0]>=300:raise Problem(400,'Достигнут лимит предложений')
+ try:
+  from PIL import Image
+  if not isinstance(data['image'],str) or len(data['image'])>470000:raise ValueError()
+  raw=base64.b64decode(data['image'],validate=True)
+  if len(raw)>350000:raise ValueError()
+  with Image.open(io.BytesIO(raw)) as image:
+   if image.width<1 or image.height<1 or image.width>512 or image.height>512 or getattr(image,'n_frames',1)!=1:raise ValueError()
+   image.load();clean=io.BytesIO();image.convert('RGBA').save(clean,format='WEBP',quality=88);asset=clean.getvalue()
+ except Exception:raise Problem(400,'Нужен стикер WebP, PNG или JPEG до 512 × 512')
+ nonce=secrets.token_bytes(12);encrypted=nonce+AESGCM(CHANNEL_KEY).encrypt(nonce,asset,('oldy-sticker-offer-v1:'+sid).encode())
+ with LOCK:
+  current=DB.execute('SELECT owner FROM sticker_offers WHERE id=?',(sid,)).fetchone()
+  if current and current[0]!=nick:raise Problem(403,'Предложение принадлежит другому автору')
+  DB.execute('INSERT INTO sticker_offers VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,price_minor=excluded.price_minor,asset=excluded.asset',(sid,nick,title.strip(),amount,'RUB',encrypted,int(time.time()*1000)));DB.commit()
+ fee=amount*1500//10000
+ return {'id':sid,'status':'draft_payment_not_configured','price_minor':amount,'currency':'RUB','fee_basis_points':1500,'oldi_fee_minor':fee,'seller_before_external_fees_minor':amount-fee,'checkout_enabled':False}
+
+
 class Problem(Exception):
  def __init__(self, status, code): self.status,self.code=status,code
 
@@ -617,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
     if self.headers.get('Transfer-Encoding'):raise Problem(400,'Unsupported request')
     try:n=int(self.headers.get('Content-Length','0'))
     except ValueError:raise Problem(400,'Invalid length')
-    if n<0 or n>(1600000 if path=='/videos/cover' else 750000 if path in ('/profile','/room/update') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
+    if n<0 or n>(1600000 if path=='/videos/cover' else 750000 if path in ('/profile','/room/update','/stickers/offers') else MAX_BODY):raise Problem(413,'Запрос слишком большой')
     try:data=json.loads(self.rfile.read(n))
     except Exception:raise Problem(400,'Некорректный JSON')
     if not isinstance(data,dict):raise Problem(400,'Некорректный запрос')
@@ -922,6 +963,17 @@ class Handler(BaseHTTPRequestHandler):
     if not isinstance(protocol,int) or protocol<2 or protocol>100:raise Problem(400,'Неверная версия протокола')
     with LOCK:DB.execute('INSERT INTO capabilities VALUES(?,?) ON CONFLICT(nick) DO UPDATE SET protocol=excluded.protocol',(nick,protocol));DB.commit()
     return self.reply({'ok':True})
+   if path=='/youtube/config' and not post:
+    return self.reply(youtube_network_config())
+   if path=='/stickers/catalog' and not post:
+    return self.reply({'enabled':False,'payment_status':'not_configured','fee_basis_points':1500,'currency':'RUB','items':[]})
+   if path=='/stickers/offers' and not post:
+    with LOCK:rows=DB.execute('SELECT id,title,price_minor,currency,created_at FROM sticker_offers WHERE owner=? ORDER BY created_at DESC LIMIT 300',(nick,)).fetchall()
+    return self.reply({'offers':[dict(id=r[0],title=r[1],price_minor=r[2],currency=r[3],created_at=r[4],status='draft_payment_not_configured',fee_basis_points=1500) for r in rows],'checkout_enabled':False})
+   if path=='/stickers/offers' and post:
+    return self.reply(save_sticker_offer(nick,data))
+   if path=='/stickers/purchase' and post:
+    raise Problem(503,'Продажи ещё не включены. Платёжная система не подключена; списания не производятся.')
    if path=='/contacts/settings' and not post:
     with LOCK:entry=DB.execute('SELECT enabled FROM contact_discovery WHERE nick=?',(nick,)).fetchone()
     return self.reply({'discoverable':bool(entry and entry[0]),'match_by':'verified_email'})

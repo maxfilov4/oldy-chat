@@ -4,8 +4,9 @@ import java.util.Arrays;
 /** Local PCM processing; no network, model download or changes to the source file. */
 final class AudioDsp {
  static short[] process(short[] source,int rate,int effect,float strength){
-  strength=Math.max(0,Math.min(1,strength));if(effect==0)return source.clone();
-  if(effect==1)return denoise(source,rate,strength);
+  strength=Math.max(0,Math.min(1,strength));if(effect==0||strength==0)return source.clone();
+  if(effect==1)return denoise(declick(source,rate,strength),rate,strength);
+  if(effect==5)return declick(source,rate,strength);
   short[] out=new short[source.length];double low=0,high=0,previous=0,peak=1;
   double hp=Math.exp(-2*Math.PI*(effect==2?280:70)/rate),lp=1-Math.exp(-2*Math.PI*3200/rate);
   float[] values=new float[source.length];int delay=Math.max(1,(int)(rate*.19));
@@ -18,6 +19,18 @@ final class AudioDsp {
   }
   for(int i=0;i<out.length;i++)out[i]=(short)Math.round(values[i]/peak*32767);return out;
  }
+ /** Only short, isolated discontinuities. Speech transients that do not immediately
+  * return to their previous level are retained. This is not a cough classifier. */
+ static short[] declick(short[] source,int rate,float amount){short[] out=source.clone();int max=Math.max(1,Math.min(5,rate/8000));double limit=9500-amount*3500;
+  for(int i=8;i<source.length-max-8;i++){double before=(source[i-1]+source[i-2]+source[i-3])/3.0;if(Math.abs(source[i]-before)<limit)continue;
+   for(int n=1;n<=max;n++){double after=(source[i+n]+source[i+n+1]+source[i+n+2])/3.0;double slope=Math.max(Math.abs(source[i-1]-source[i-4]),Math.abs(source[i+n+3]-source[i+n]));if(Math.abs(after-before)>Math.max(1000,slope*2)||Math.abs(source[i+n]-before)>limit*.35)continue;
+    boolean spike=true;for(int k=0;k<n;k++)if(Math.abs(source[i+k]-(before+(after-before)*(k+1)/(n+1)))<limit*.6)spike=false;if(!spike)continue;
+    for(int k=0;k<n;k++){double repaired=source[i-1]+(source[i+n]-source[i-1])*(k+1.0)/(n+1);out[i+k]=(short)Math.round(repaired);}i+=n;break;
+   }
+  }return out;
+ }
+ /** User-selected unwanted sound: retain timing and use fades to avoid boundary clicks. */
+ static short[] muteRange(short[] source,int rate,int start,int end){short[] out=source.clone();start=Math.max(0,Math.min(source.length,start));end=Math.max(start,Math.min(source.length,end));int fade=Math.min(Math.max(1,rate/100),(end-start)/2);for(int i=start;i<end;i++){double gain=0;if(fade>0&&i-start<fade)gain=.5+.5*Math.cos(Math.PI*(i-start)/fade);else if(fade>0&&end-1-i<fade)gain=.5+.5*Math.cos(Math.PI*(end-1-i)/fade);out[i]=(short)Math.round(source[i]*gain);}return out;}
  static short[] denoise(short[] source,int rate,float amount){
   final int n=1024,hop=256,pad=n/2;int length=source.length+2*pad;
   int frames=(length+n-1)/hop;double[] energy=new double[frames],window=new double[n];

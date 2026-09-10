@@ -79,7 +79,7 @@ final class Vault {
   revealChat(to);String id=java.util.UUID.randomUUID().toString();long now=System.currentTimeMillis();JSONObject p=new JSONObject(body.toString());
   JSONObject m=new JSONObject().put("id",id).put("peer",to).put("text",p.optString("text")).put("kind",p.optString("kind","text")).put("time",now).put("out",true).put("status","pending");
   if(local!=null)m.put("local",local);
-  for(String key:new String[]{"mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform"})if(p.has(key))m.put(key,p.get(key));
+  for(String key:new String[]{"mime","size","name","sha256","sticker","reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform","custom_sticker","sticker_id","sticker_author"})if(p.has(key))m.put(key,p.get(key));
   JSONObject envelopes=new JSONObject();
   if(Conversation.community(to)){
    JSONObject r=room(Conversation.room(to));if(r==null)throw new Exception(I18n.t("Чат недоступен"));
@@ -132,12 +132,13 @@ final class Vault {
   if(k.equals("control"))applyControl(target,peer.getString("nick"),p,envelope.getLong("time"));
   JSONObject m=new JSONObject().put("id",envelope.getString("id")).put("peer",target).put("from",peer.getString("nick")).put("text",p.optString("text")).put("kind",k).put("time",envelope.getLong("time")).put("out",false).put("status","received");
   if(k.equals("file")){
+   if(p.optBoolean("custom_sticker")&&(!p.optString("mime").equals("image/webp")||p.optLong("size")>350000||!p.optString("sticker_id").matches("[a-f0-9-]{36}")||!p.optString("sticker_author").equals(peer.getString("nick"))))throw new Exception(I18n.t("Неверный авторский стикер"));
    if(!p.optString("mime").matches("image/(jpeg|png|webp)|video/(mp4|webm)|audio/(mp4|ogg|mpeg|wav|x-wav|flac|opus|x-flac)")||p.optLong("size")<1||p.optLong("size")>(p.optString("cloud_video").matches("[a-f0-9-]{36}")?2147483648L:MediaFiles.MAX)||!p.optString("sha256").matches("[a-fA-F0-9]{64}"))throw new Exception(I18n.t("Неподдерживаемое вложение"));
    for(String key:new String[]{"mime","size","sha256"})m.put(key,p.get(key));m.put("name",p.optString("name",I18n.t("Медиа")).replaceAll("[\\r\\n/\\\\]","_").substring(0,Math.min(100,p.optString("name",I18n.t("Медиа")).length())));
   }
   if(k.equals("sticker")){int sticker=p.optInt("sticker");m.put("sticker",sticker>=100&&sticker<108?sticker:Math.max(0,Math.min(11,sticker)));}
   if(k.equals("control"))m.put("control",p);
-  for(String extra:new String[]{"reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform"})if(p.has(extra))m.put(extra,p.get(extra));
+  for(String extra:new String[]{"reply","link","thumb","cloud_video","round","animated","cloud_blob","blob_key","blob_iv","duration","waveform","custom_sticker","sticker_id","sticker_author"})if(p.has(extra))m.put(extra,p.get(extra));
   data.getJSONArray("messages").put(m);save();
  }
  synchronized long channelCursor(String rid)throws Exception{return bucket("channel_cursors").optLong(rid);}

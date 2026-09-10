@@ -32,6 +32,29 @@ class RelayTest(unittest.TestCase):
   self.mod.LIMITS.clear()
   with self.mod.LOCK:
    self.mod.DB.execute("DELETE FROM archive");self.mod.DB.commit()
+ def test_youtube_rules_cannot_redirect_traffic(self):
+  code,config=self.request('/youtube/config',token=self.tokens['alice']);self.assertEqual(code,200);self.assertEqual(set(config['domains']),set(self.mod.YOUTUBE_ROOTS));self.assertNotIn('proxy',config)
+  path=self.mod.ROOT/'youtube-rules.json'
+  try:
+   path.write_text(json.dumps(dict(config,version=2,domains=['attacker.example'],proxy='https://attacker.example')))
+   self.assertEqual(self.request('/youtube/config',token=self.tokens['alice'])[1]['version'],1)
+   path.write_text(json.dumps(dict(config,version=2,enabled=False,domains=['youtube.com'])))
+   self.assertFalse(self.request('/youtube/config',token=self.tokens['alice'])[1]['enabled'])
+  finally:path.unlink(missing_ok=True)
+ def test_sticker_drafts_are_private_and_checkout_is_closed(self):
+  from PIL import Image
+  import io
+  image=io.BytesIO();Image.new('RGBA',(32,32),(10,200,150,180)).save(image,format='WEBP')
+  offer={'id':str(uuid.uuid4()),'title':'My original sticker','image':base64.b64encode(image.getvalue()).decode(),'price_minor':9900,'currency':'RUB','rights_confirmed':True}
+  self.assertEqual(self.request('/stickers/offers',offer)[0],401)
+  code,reply=self.request('/stickers/offers',offer,self.tokens['alice']);self.assertEqual(code,200);self.assertEqual(reply['oldi_fee_minor'],1485);self.assertEqual(reply['seller_before_external_fees_minor'],8415);self.assertFalse(reply['checkout_enabled'])
+  own=self.request('/stickers/offers',token=self.tokens['alice'])[1]['offers'];other=self.request('/stickers/offers',token=self.tokens['bobby'])[1]['offers'];self.assertIn(offer['id'],[r['id'] for r in own]);self.assertNotIn(offer['id'],[r['id'] for r in other]);self.assertFalse(any('image' in r for r in own))
+  self.assertEqual(self.request('/stickers/offers',offer,self.tokens['bobby'])[0],403)
+  self.assertEqual(self.request('/stickers/purchase',{'id':offer['id'],'paid':True},self.tokens['bobby'])[0],503)
+  self.assertFalse(self.request('/stickers/catalog',token=self.tokens['bobby'])[1]['enabled'])
+  for changed in [{'price_minor':True},{'price_minor':99},{'price_minor':10.5},{'rights_confirmed':False},{'image':'not an image'}]:
+   self.assertEqual(self.request('/stickers/offers',dict(offer,**changed),self.tokens['alice'])[0],400)
+  asset=self.mod.DB.execute('SELECT asset FROM sticker_offers WHERE id=?',(offer['id'],)).fetchone()[0];self.assertNotIn(b'RIFF',asset)
  def channel_record(self,rid,text='Published before joining',nick='alice',mid=None,thread='',control=None,extra=None):
   payload={'kind':'text','text':text,'room':rid}
   if thread:payload['thread']=thread
