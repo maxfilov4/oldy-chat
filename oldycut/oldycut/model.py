@@ -135,6 +135,7 @@ class Project:
         if len(self.media)>1000 or len(self.clips)>10000: raise ValueError('Слишком много фрагментов')
         ids={m.id:m for m in self.media}
         if len(ids)!=len(self.media): raise ValueError('Повторяющиеся исходники в проекте')
+        if len({c.id for c in self.clips})!=len(self.clips):raise ValueError('Повторяющиеся идентификаторы фрагментов')
         for m in self.media:
             if not math.isfinite(m.duration) or m.duration<=0: raise ValueError('Неверная длительность исходника')
         for c in self.clips:

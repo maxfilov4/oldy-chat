@@ -31,6 +31,8 @@ pl.update(CFBundleShortVersionString='0.1.0',CFBundleVersion='1',LSMinimumSystem
 with info.open('wb') as f:plistlib.dump(pl,f)
 subprocess.run(['codesign','--force','--deep','--sign','-',str(app)],check=True)
 subprocess.run(['codesign','--verify','--deep','--strict','--verbose=2',str(app)],check=True)
+from audit_macos import audit
+audit(app,root/'build/bundle-check/compatibility.json')
 print('Bundled smoke test',flush=True)
 subprocess.run([str(app/'Contents/MacOS/Oldy Cut'),'--self-test',str(root/'build/bundle-check')],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},check=True,timeout=180)
 stage=root/'build/dmg';stage.mkdir(exist_ok=True);shutil.copytree(app,stage/'Oldy Cut.app',dirs_exist_ok=True,symlinks=True)

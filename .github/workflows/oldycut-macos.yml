@@ -35,5 +35,6 @@ jobs:
           path: |
             oldycut/release/*
             oldycut/build/bundle-check/result.json
+            oldycut/build/bundle-check/compatibility.json
             oldycut/build/bundle-check/app.png
           retention-days: 30

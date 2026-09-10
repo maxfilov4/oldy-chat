@@ -118,7 +118,7 @@ def audio_chunk(media,start,duration,path,runner,wav=False):
 
 def grade_filters(grade,folder=None):
     g=grade;out=[]
-    if g.exposure:out.append(f'colorchannelmixer=rr={2**g.exposure}:gg={2**g.exposure}:bb={2**g.exposure}')
+    if g.exposure:out.append(f'exposure=exposure={g.exposure}')
     out.append(f'eq=contrast={g.contrast}:saturation={g.saturation}:gamma={g.gamma}')
     if g.temperature:out.append(f'colorbalance=rs={g.temperature}:bs={-g.temperature}:rh={g.temperature/2}:bh={-g.temperature/2}')
     if g.denoise:out.append(f'hqdn3d={g.denoise}:{g.denoise}:{g.denoise*1.5}:{g.denoise*1.5}')

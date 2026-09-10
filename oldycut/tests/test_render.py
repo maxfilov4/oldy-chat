@@ -58,5 +58,9 @@ class RenderTests(unittest.TestCase):
         report=Runner().run(['-i',out],allow_failure=True);self.assertIn('hevc',report.lower())
     def test_processed_color_frame(self):
         c=Clip(self.media[0].id,0,1);c.grade.saturation=0;out=color_preview(self.media[0],c,self.folder/'color');mean=ImageStat.Stat(Image.open(out)).mean;self.assertLess(max(mean)-min(mean),5)
+    def test_exposure_extremes_and_music_mix(self):
+        c=Clip(self.media[0].id,0,1);c.grade.exposure=2;c.grade.temperature=.5;c.grade.sharpen=2;c.grade.denoise=6;c.grade.vignette=True
+        music=self.folder/'music.wav';Runner().run(['-y','-f','lavfi','-i','sine=frequency=200:sample_rate=48000:duration=2',music])
+        p=Project(media=self.media,clips=[c],export=Export(width=320,height=180,music=str(music),normalize_audio=True));out=self.folder/'graded-music.mp4';Renderer().render(p,out);self.assertTrue(probe(out).audio);self.assertAlmostEqual(probe(out).duration,1,delta=.08)
 
 if __name__=='__main__':unittest.main()
