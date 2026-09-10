@@ -47,6 +47,13 @@ jobs:
           java -cp build/dsp chat.oldy.YouTubeLinkCheck
       - name: Build signed APK
         run: bash tools/build-apk.sh
+      - name: Free completed build intermediates for Android emulator
+        run: |
+          test -s build/OldyChat-beta.apk
+          test -s build/OldyChat-tests.apk
+          test -s build/OldyChat-Play.aab
+          rm -rf app/build/intermediates app/build/.cxx .native
+          df -h .
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
