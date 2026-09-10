@@ -37,7 +37,7 @@ jobs:
           sudo systemctl stop coturn
       - name: Server tests
         run: |
-          python3 -m pip install cryptography pillow aiortc==1.15.0
+          python3 -m pip install cryptography pillow aiortc==1.15.0 vosk==0.3.45
           python3 -m unittest discover -s tests -v
       - name: Verify local audio processing
         run: |
@@ -74,6 +74,7 @@ jobs:
             build/OldyChat-beta.apk
             build/OldyChat-Play.aab
             build/speech-results.txt
+            build/speech-reference-results.json
             build/legal-ui-results.txt
             build/Server-maintenance-only.txt
             build/OldyChat-0.6.1-server.tar.gz
