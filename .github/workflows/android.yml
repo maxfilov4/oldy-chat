@@ -58,6 +58,8 @@ jobs:
           api-level: 36
           arch: x86_64
           profile: pixel_2
+          disk-size: 4096M
+          emulator-boot-timeout: 240
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-front emulated -camera-back emulated
           disable-animations: true
           script: bash tools/smoke.sh
