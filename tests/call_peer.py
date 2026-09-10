@@ -1,5 +1,5 @@
 """Independent WebRTC peer for emulator tests only; never included in a server release."""
-import asyncio, array, base64, fractions, json, math, os, ssl, threading, time, urllib.request, uuid
+import asyncio, array, base64, fractions, http.client, json, math, os, ssl, threading, time, urllib.error, uuid
 from aiortc import RTCPeerConnection, RTCConfiguration, RTCSessionDescription, AudioStreamTrack
 from av import AudioFrame
 from cryptography.hazmat.primitives import hashes, serialization
@@ -31,8 +31,15 @@ class CallPeer:
  def request(self,path,body=None):
   headers={'Content-Type':'application/json','Connection':'close'}
   if self.token:headers['Authorization']='Bearer '+self.token
-  r=urllib.request.Request('https://127.0.0.1:8444'+path, data=None if body is None else json.dumps(body).encode(), headers=headers)
-  with urllib.request.urlopen(r,context=self.ssl,timeout=30) as response:return json.load(response)
+  # This independent test device gets its own loopback source address.
+  # Keep the real server's per-IP registration limits intact.
+  connection=http.client.HTTPSConnection('127.0.0.1',8444,context=self.ssl,timeout=30,source_address=('127.0.0.2',0))
+  try:
+   connection.request('GET' if body is None else 'POST',path,body=None if body is None else json.dumps(body).encode(),headers=headers)
+   response=connection.getresponse()
+   if response.status!=200:raise urllib.error.HTTPError('https://127.0.0.1:8444'+path,response.status,response.reason,response.headers,None)
+   return json.load(response)
+  finally:connection.close()
  async def api(self,path,body=None):return await asyncio.to_thread(self.request,path,body)
  async def begin(self):
   try:
