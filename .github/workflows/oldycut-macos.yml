@@ -31,10 +31,11 @@ jobs:
         run: python tools/build_macos.py
       - uses: actions/upload-artifact@v4
         with:
-          name: OldyCut-0.1.0-Intel
+          name: OldyCut-0.2.0-Intel
           path: |
             oldycut/release/*
             oldycut/build/bundle-check/result.json
             oldycut/build/bundle-check/compatibility.json
             oldycut/build/bundle-check/app.png
+            oldycut/build/bundle-check/progress.png
           retention-days: 30

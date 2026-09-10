@@ -35,7 +35,8 @@ class ModelTests(unittest.TestCase):
         row=dict(start=0,end=8,overlays=[dict(style='image',asset_id='/etc/passwd')])
         with self.assertRaises(ValueError):build_clips({'keep':[row]},self.m,0,20,{})
     def test_api_schema_and_usage(self):
-        api=API('test-key',budget=10);api._post=Mock(return_value={'status':'completed','usage':{'input_tokens':1000,'output_tokens':100},'output':[{'content':[{'type':'output_text','text':'{"keep":[]}'}]}]})
+        directory=tempfile.TemporaryDirectory();self.addCleanup(directory.cleanup)
+        api=API('test-key',budget=10,cache_dir=directory.name);api._post=Mock(return_value={'status':'completed','usage':{'input_tokens':1000,'output_tokens':100},'output':[{'content':[{'type':'output_text','text':'{"keep":[]}'}]}]})
         self.assertEqual(api.structured([{'type':'input_text','text':'Задание'}]),{'keep':[]});self.assertAlmostEqual(api.spent,.015)
         data=api._post.call_args.kwargs['json'];self.assertFalse(data['store']);self.assertTrue(data['text']['format']['strict']);self.assertEqual(data['model'],'gpt-6-astra')
     def test_budget_blocks_before_call(self):

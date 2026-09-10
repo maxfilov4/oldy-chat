@@ -27,7 +27,7 @@ for package in ['PySide6','shiboken6','Pillow','requests','keyring','imageio-ffm
 subprocess.run([sys.executable,'-m','PyInstaller','--clean','--noconfirm','--windowed','--onedir','--name','Oldy Cut','--osx-bundle-identifier','com.oldy.cut','--target-architecture','x86_64','--icon','assets/OldyCut.icns','--add-data','assets:assets','--collect-all','imageio_ffmpeg','--hidden-import','keyring.backends.macOS','--hidden-import','PySide6.QtSvg','--exclude-module','matplotlib','--exclude-module','tkinter','main.py'],check=True)
 app=root/'dist/Oldy Cut.app';info=app/'Contents/Info.plist'
 with info.open('rb') as f:pl=plistlib.load(f)
-pl.update(CFBundleShortVersionString='0.1.0',CFBundleVersion='1',LSMinimumSystemVersion='12.0',NSHighResolutionCapable=True,NSDocumentsFolderUsageDescription='Выбор исходников и сохранение проектов Oldy Cut.',NSDownloadsFolderUsageDescription='Выбор видео из загрузок.',NSRemovableVolumesUsageDescription='Монтаж исходников с внешнего диска.',CFBundleDocumentTypes=[{'CFBundleTypeName':'Oldy Cut Project','CFBundleTypeExtensions':['oldycut'],'CFBundleTypeRole':'Editor'}])
+pl.update(CFBundleShortVersionString='0.2.0',CFBundleVersion='2',LSMinimumSystemVersion='12.0',NSHighResolutionCapable=True,NSDocumentsFolderUsageDescription='Выбор исходников и сохранение проектов Oldy Cut.',NSDownloadsFolderUsageDescription='Выбор видео из загрузок.',NSRemovableVolumesUsageDescription='Монтаж исходников с внешнего диска.',CFBundleDocumentTypes=[{'CFBundleTypeName':'Oldy Cut Project','CFBundleTypeExtensions':['oldycut'],'CFBundleTypeRole':'Editor'}])
 with info.open('wb') as f:plistlib.dump(pl,f)
 subprocess.run(['codesign','--force','--deep','--sign','-',str(app)],check=True)
 subprocess.run(['codesign','--verify','--deep','--strict','--verbose=2',str(app)],check=True)
@@ -39,7 +39,7 @@ stage=root/'build/dmg';stage.mkdir(exist_ok=True);shutil.copytree(app,stage/'Old
 os.symlink('/Applications',stage/'Applications')
 shutil.copyfile(root/'README-RU.md',stage/'Как начать.txt')
 out=root/'release';out.mkdir(exist_ok=True)
-dmg=out/'OldyCut-0.1.0-Intel.dmg'
+dmg=out/'OldyCut-0.2.0-Intel.dmg'
 subprocess.run(['hdiutil','create','-volname','Oldy Cut','-srcfolder',str(stage),'-ov','-format','UDZO',str(dmg)],check=True)
 shutil.copyfile(root/'README-RU.md',out/'OldyCut-Readme.txt')
 (out/'SHA256SUMS.txt').write_text(hashlib.sha256(dmg.read_bytes()).hexdigest()+'  '+dmg.name+'\n')

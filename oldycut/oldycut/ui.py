@@ -12,7 +12,9 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from .model import Project, Clip, Grade, Overlay, History, PRESETS, TRANSITIONS, timecode, subtract_ranges, uid
 from .engine import Runner, Renderer, Cancelled, probe, thumbnail, color_preview, app_dir, resources, silence_ranges
-from .ai import API, Planner
+from .ai import API, Planner, UnconfirmedRequest
+from .diagnostics import RunLog, redact
+from .jobs_ui import JobDialog
 
 STYLE='''
 QWidget { background:#111722; color:#dce5f0; font-size:13px; }
@@ -85,12 +87,27 @@ def select_data(widget,value):
     if i>=0:widget.setCurrentIndex(i)
 
 class Worker(QThread):
-    progress=Signal(int,str);succeeded=Signal(object);failed=Signal(str);cancelled=Signal()
-    def __init__(self,task):super().__init__();self.runner=Runner();self.task=task
+    progress=Signal(int,str);event=Signal(object);succeeded=Signal(object);failed=Signal(object);cancelled=Signal()
+    def __init__(self,task,title='Обработка'):
+        super().__init__();self.task=task;self.journal=RunLog(app_dir()/'logs',title)
+        self.runner=Runner(event=self.report)
+    def report(self,event):
+        if event['type'] not in ('media',):
+            message=event.get('message') or event.get('name')
+            if message:
+                line=self.journal.write(event['type']+' · '+str(message),self.runner.secrets)
+                self.event.emit({'type':'line','message':line})
+        self.event.emit(event)
+    def milestone(self,n,s):
+        self.report({'type':'log','message':s});self.progress.emit(n,s)
     def run(self):
-        try:self.succeeded.emit(self.task(self.runner,lambda n,s:self.progress.emit(n,s)))
-        except Cancelled:self.cancelled.emit()
-        except Exception as exc:self.failed.emit(str(exc))
+        try:
+            result=self.task(self.runner,self.milestone);self.runner.check();self.succeeded.emit(result)
+        except Cancelled:
+            self.report({'type':'log','message':'Операция остановлена пользователем.'});self.cancelled.emit()
+        except Exception as exc:
+            self.report({'type':'log','message':traceback.format_exc()});self.failed.emit(exc)
+
 
 class SettingsDialog(QDialog):
     def __init__(self,parent):
@@ -102,7 +119,30 @@ class SettingsDialog(QDialog):
         form=QFormLayout();form.addRow('Ключ',self.key);form.addRow('Бюджет одного запуска',self.budget);lay.addLayout(form)
         lay.addWidget(label('Ключ сохраняется в Связке ключей macOS. Подписка ChatGPT не оплачивает API. Бюджет — предохранитель по оценке токенов; окончательное списание показывает OpenAI.',True))
         links=label('<a style="color:#80e4d6" href="https://platform.openai.com/api-keys">Получить ключ</a> · <a style="color:#80e4d6" href="https://platform.openai.com/usage">Расходы OpenAI</a>');links.setOpenExternalLinks(True);lay.addWidget(links)
-        box=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel);box.accepted.connect(self.accept);box.rejected.connect(self.reject);lay.addWidget(box)
+        self.check_worker=None
+        self.check_button=button('Проверить ключ и подключение',self.check_key);lay.addWidget(self.check_button)
+        self.check_status=label('Проверка доступа к модели без запуска монтажа.',True);lay.addWidget(self.check_status)
+        lay.addWidget(label('Долгие монтажные запросы выполняются в фоне OpenAI. Ответ временно хранится для получения результата; постоянное хранение отключено.',True))
+        self.box=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel);self.box.accepted.connect(self.accept);self.box.rejected.connect(self.reject);lay.addWidget(self.box)
+    def check_key(self):
+        if self.check_worker:return
+        key=self.key.text().strip()
+        if not key:self.check_status.setText('Сначала вставь API-ключ в поле выше.');return
+        self.check_button.setEnabled(False);self.key.setEnabled(False);self.box.setEnabled(False);self.check_status.setText('Проверяем OpenAI…')
+        self.check_worker=Worker(lambda r,p:API(key,r).check_connection(),'Проверка OpenAI')
+        self.check_worker.succeeded.connect(lambda message:self.check_status.setText(message))
+        self.check_worker.failed.connect(lambda error:self.check_status.setText(redact(error,[key])+'\nЖурнал: '+str(self.check_worker.journal.path)))
+        self.check_worker.finished.connect(self.check_finished);self.check_worker.start()
+    def check_finished(self):
+        worker=self.check_worker;self.check_worker=None;self.check_button.setEnabled(True);self.key.setEnabled(True);self.box.setEnabled(True)
+        worker.deleteLater()
+    def reject(self):
+        if self.check_worker:
+            self.check_worker.runner.cancel();self.check_status.setText('Завершаем сетевую проверку…');return
+        super().reject()
+    def closeEvent(self,event):
+        if self.check_worker:self.reject();event.ignore()
+        else:event.accept()
 
 class OverlayDialog(QDialog):
     def __init__(self,clip,media,parent=None):
@@ -161,7 +201,7 @@ class OverlayDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self,restore=True):
         super().__init__();self.setWindowTitle('Oldy Cut');self.resize(1400,880);self.setMinimumSize(1100,700)
-        self.settings=QSettings('Oldy','Cut');self.project=Project();self.history=History();self.project_path='';self.loading=False;self.worker=None;self.api_key='';self.selected_id=None;self.preview_mode=False;self.dirty=False
+        self.settings=QSettings('Oldy','Cut');self.project=Project();self.history=History();self.project_path='';self.loading=False;self.worker=None;self.api_key='';self.selected_id=None;self.preview_mode=False;self.dirty=False;self.job_dialog=None
         try:
             import keyring
             self.api_key=keyring.get_password('Oldy Cut','OpenAI') or ''
@@ -197,7 +237,7 @@ class MainWindow(QMainWindow):
         actions=QHBoxLayout();actions.addWidget(button('←',lambda:self.move_clip(-1)));actions.addWidget(button('→',lambda:self.move_clip(1)));actions.addWidget(button('Разрезать',self.split_clip));self.cut_button=button('Исключить',self.toggle_clip);actions.addWidget(self.cut_button);actions.addStretch();self.show_removed=QCheckBox('Вырезки');self.show_removed.toggled.connect(lambda:self.refresh_timeline());actions.addWidget(self.show_removed);cl.addLayout(actions)
         self.splitter.addWidget(center)
         self.tabs=QTabWidget();self.tabs.addTab(scroll(self.ai_panel()),'ИИ');self.tabs.addTab(scroll(self.clip_panel()),'Монтаж');self.tabs.addTab(scroll(self.grade_panel()),'Цвет');self.tabs.addTab(scroll(self.export_panel()),'Вывод');self.tabs.setMinimumWidth(330);self.splitter.addWidget(self.tabs);self.splitter.setSizes([245,770,345])
-        bottom=QHBoxLayout();self.status=label('Можно начать с ручного монтажа или задания для ИИ.',True);bottom.addWidget(self.status,1);self.progress=QProgressBar();self.progress.setFixedWidth(180);self.progress.setTextVisible(False);self.progress.hide();bottom.addWidget(self.progress);self.cancel_button=button('Отмена',self.cancel_job);self.cancel_button.hide();bottom.addWidget(self.cancel_button);main.addLayout(bottom)
+        bottom=QHBoxLayout();self.status=label('Можно начать с ручного монтажа или задания для ИИ.',True);bottom.addWidget(self.status,1);self.progress=QProgressBar();self.progress.setFixedWidth(180);self.progress.setTextVisible(False);self.progress.hide();bottom.addWidget(self.progress);self.cancel_button=button('Отмена',self.cancel_job);self.cancel_button.hide();bottom.addWidget(self.cancel_button);self.job_button=button('Ход работы',self.show_job);bottom.addWidget(self.job_button);main.addLayout(bottom)
     def ai_panel(self):
         w=QWidget();l=QVBoxLayout(w);l.setContentsMargins(16,18,16,16);l.addWidget(label('Твой монтажёр',heading=True));l.addWidget(label('Опиши, какой ролик хочешь получить. После сборки любую правку можно изменить.',True))
         self.prompt=QPlainTextEdit();self.prompt.setMinimumHeight(180);self.prompt.textChanged.connect(self.prompt_changed);l.addWidget(self.prompt)
@@ -434,8 +474,8 @@ class MainWindow(QMainWindow):
             c=copy.deepcopy(c);c.enabled=True;c.transition='cut';p.clips=[c]
         output=app_dir()/'preview.mp4';self.player.stop();self.player.setSource(QUrl())
         def done(path):
-            self.preview_mode=True;self.viewer_title.setText('ГОТОВЫЙ МОНТАЖ · превью 960p');self.player.setSource(QUrl.fromLocalFile(path));self.viewer.setCurrentWidget(self.video);self.player.play();self.play_button.setText('Ⅱ')
-        self.start_job(lambda r,progress:Renderer(r,progress).render(p,output,preview=True),done)
+            self.preview_mode=True;self.viewer_title.setText('ГОТОВЫЙ МОНТАЖ · уменьшенное превью');self.player.setSource(QUrl.fromLocalFile(path));self.viewer.setCurrentWidget(self.video);self.player.play();self.play_button.setText('Ⅱ')
+        self.start_job(lambda r,progress:Renderer(r,progress).render(p,output,preview=True),done,'Сборка превью',True)
     def export_video(self):
         if not self.project.active():self.error('Добавь хотя бы один фрагмент на монтажную ленту.');return
         try:self.read_export()
@@ -445,8 +485,8 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith('.'+ext):path+='.'+ext
         self.changed();p=copy.deepcopy(self.project)
         def done(output):
-            self.status.setText('Видео сохранено: '+Path(output).name);QMessageBox.information(self,'Видео готово','Сохранено:\n'+output)
-        self.start_job(lambda r,progress:Renderer(r,progress).render(p,path),done)
+            self.status.setText('Видео сохранено: '+Path(output).name)
+        self.start_job(lambda r,progress:Renderer(r,progress).render(p,path),done,'Экспорт видео',True)
     def settings_dialog(self):
         d=SettingsDialog(self)
         if d.exec()!=QDialog.DialogCode.Accepted:return
@@ -465,14 +505,14 @@ class MainWindow(QMainWindow):
         if not any(not m.image for m in self.project.media):self.error('Сначала добавь видеоисходники.');return
         self.project.prompt=self.prompt.toPlainText().strip();p=copy.deepcopy(self.project);check=self.check_audio.isChecked();key=self.api_key;budget=self.settings.value('budget',10,type=float)
         def task(r,progress):return Planner(API(key,r,budget),progress).analyze(p,check)
-        self.start_job(task,self.apply_ai)
+        self.start_job(task,self.apply_ai,'Монтаж по заданию',True)
     def ai_refine(self):
         instruction=self.refine.toPlainText().strip()
         if not instruction or not self.project.clips:return
         if not self.api_key:self.settings_dialog()
         if not self.api_key:return
         p=copy.deepcopy(self.project);key=self.api_key;budget=self.settings.value('budget',10,type=float)
-        self.start_job(lambda r,progress:Planner(API(key,r,budget),progress).refine(p,instruction),self.apply_ai)
+        self.start_job(lambda r,progress:Planner(API(key,r,budget),progress).refine(p,instruction),self.apply_ai,'Правки монтажа с GPT‑6',True)
     def apply_ai(self,p):self.before();self.project=p;self.changed();self.refresh();self.status.setText('Монтаж собран. Проверь вырезки и заметки перед экспортом.')
     def remove_silence(self):
         if not self.project.active():return
@@ -495,22 +535,54 @@ class MainWindow(QMainWindow):
                     removed=copy.deepcopy(c);removed.id=uid();removed.start=pos;removed.enabled=False;removed.reason='Тишина · можно вернуть';removed.overlays=[];clips.append(removed)
             p.clips=clips;p.validate();return p
         self.start_job(task,self.apply_ai)
-    def start_job(self,task,done):
+    def show_job(self):
+        if self.job_dialog:self.job_dialog.show();self.job_dialog.raise_();self.job_dialog.activateWindow()
+        else:QMessageBox.information(self,'Ход работы','После запуска операции здесь появятся этапы, время и журнал.')
+    def start_job(self,task,done,title='Обработка',auto_show=False):
         if self.worker:return
-        self.worker=Worker(task);self.busy(True);self.status.setText('Подготовка…');self.progress.setValue(0)
-        self.worker.progress.connect(lambda n,s:(self.progress.setValue(n),self.status.setText(s)))
-        self.worker.succeeded.connect(done);self.worker.failed.connect(self.error);self.worker.cancelled.connect(lambda:self.status.setText('Отменено. Исходники сохранены.'));self.worker.finished.connect(self.finish_job);self.worker.start()
+        if self.job_dialog:self.job_dialog.close();self.job_dialog.deleteLater()
+        self.handling_result=False;self.worker=Worker(task,title);self.job_dialog=JobDialog(self,title,self.worker.journal.path)
+        self.job_dialog.cancelRequested.connect(self.cancel_job);self.job_dialog.summaryChanged.connect(self.status.setText)
+        self.worker.event.connect(self.job_dialog.receive);self.worker.event.connect(self.reflect_job_progress)
+        self.busy(True);self.status.setText('Подготовка…');self.progress.setRange(0,0)
+        self.worker.progress.connect(lambda n,s:self.job_dialog.context.setText(s))
+        self.worker.succeeded.connect(lambda result:self.job_succeeded(result,done,title))
+        self.worker.failed.connect(self.job_failed);self.worker.cancelled.connect(self.job_cancelled)
+        self.worker.finished.connect(self.finish_job);self.worker.start()
+        if auto_show:self.show_job()
+    def reflect_job_progress(self,event):
+        bar=self.job_dialog.bar;self.progress.setRange(bar.minimum(),bar.maximum());self.progress.setValue(bar.value())
+    def job_succeeded(self,result,done,title):
+        self.handling_result=True
+        try:done(result)
+        except Exception as exc:
+            self.worker.report({'type':'log','message':traceback.format_exc()});self.job_failed(exc);return
+        message='Готово. '+('Монтажный план применён. Дальше — просмотр и «Экспорт видео».' if isinstance(result,Project) else 'Видео сохранено.' if title=='Экспорт видео' else 'Результат готов к просмотру.')
+        self.worker.report({'type':'log','message':message});self.job_dialog.finish(True,message);self.handling_result=False
+    def job_failed(self,error):
+        self.handling_result=True
+        self.job_dialog.finish(False,'Операция не завершена. Причина — в журнале.');self.show_job()
+        if isinstance(error,UnconfirmedRequest):
+            box=QMessageBox(self);box.setWindowTitle('Запрос OpenAI');box.setText(str(error))
+            reset=box.addButton('Разрешить новую попытку',QMessageBox.ButtonRole.ActionRole);box.addButton('Оставить как есть',QMessageBox.ButtonRole.RejectRole);box.exec()
+            if box.clickedButton()==reset:
+                error.path.unlink(missing_ok=True);self.worker.report({'type':'log','message':'Пользователь разрешил новый запрос вместо неподтверждённого. Повторный монтаж ещё не запущен.'})
+        else:QMessageBox.warning(self,'Oldy Cut',redact(error,[self.api_key])[:3500]+'\n\nНажми «Сохранить журнал…» в окне хода работы для диагностики.')
+        self.handling_result=False
+    def job_cancelled(self):self.job_dialog.finish(False,'Остановлено. Исходники и выполненный анализ сохранены.')
     def finish_job(self):
+        if getattr(self,'handling_result',False):QTimer.singleShot(100,self.finish_job);return
         worker=self.worker;self.worker=None;self.busy(False)
         if worker:worker.deleteLater()
     def busy(self,on):
         self.splitter.setEnabled(not on);self.export_button.setEnabled(not on);self.menuBar().setEnabled(not on);self.progress.setVisible(on);self.cancel_button.setVisible(on)
-        # Header actions are disabled too: project changes cannot race an encode.
         for b in self.centralWidget().findChildren(QPushButton,options=Qt.FindChildOption.FindDirectChildrenOnly):b.setEnabled(not on)
-        self.cancel_button.setEnabled(True)
+        self.cancel_button.setEnabled(True);self.job_button.setEnabled(True)
     def cancel_job(self):
-        if self.worker:self.worker.runner.cancel();self.status.setText('Останавливаем… ответ уже отправленного запроса может ещё ожидаться.');self.cancel_button.setEnabled(False)
-    def error(self,message):self.status.setText('Операция не завершена');QMessageBox.warning(self,'Oldy Cut',str(message)[:4000])
+        if self.worker:
+            self.worker.runner.cancel();self.status.setText('Останавливаем… ожидаем завершения текущего сетевого обмена.');self.cancel_button.setEnabled(False)
+            if self.job_dialog:self.job_dialog.cancel_button.setEnabled(False)
+    def error(self,message):self.status.setText('Операция не завершена');QMessageBox.warning(self,'Oldy Cut',redact(message,[self.api_key])[:4000])
     def undo(self,redo=False):
         if self.worker:return
         self.project=self.history.redo(self.project) if redo else self.history.undo(self.project);self.changed();self.refresh()

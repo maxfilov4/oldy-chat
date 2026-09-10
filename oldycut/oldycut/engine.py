@@ -24,10 +24,17 @@ def ffmpeg_path():
     raise RuntimeError('В приложении не найден FFmpeg. Переустанови Oldy Cut.')
 
 class Runner:
-    def __init__(self, log=None):
-        self.cancelled=threading.Event();self.process=None;self.lock=threading.Lock();self.log=log or (lambda s:None)
+    def __init__(self, log=None, event=None):
+        self.cancelled=threading.Event();self.process=None;self.lock=threading.Lock()
+        self.log=log or (lambda s:None);self.event=event or (lambda e:None);self.secrets=[]
+    def emit(self,event_type,**data):self.event({'type':event_type,**data})
+    def begin(self,name,kind='local'):
+        self.emit('phase',name=name,kind=kind)
+    def end(self,name):self.emit('complete',name=name)
     def check(self):
         if self.cancelled.is_set():raise Cancelled('Операция отменена')
+    def wait(self,seconds):
+        self.cancelled.wait(seconds);self.check()
     def cancel(self):
         self.cancelled.set()
         with self.lock:
@@ -35,37 +42,47 @@ class Runner:
             if p and p.poll() is None:
                 try:p.terminate()
                 except OSError:pass
-    def run(self,args,cwd=None,allow_failure=False):
+    def run(self,args,cwd=None,allow_failure=False,duration=None,label=None):
         self.check()
+        if label:self.begin(label)
+        extra=['-progress','pipe:1','-stats_period','0.5','-nostats'] if duration else []
+        started=time.monotonic()
         with self.lock:
-            p=subprocess.Popen([ffmpeg_path(),'-hide_banner','-nostdin',*map(str,args)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,cwd=cwd)
+            p=subprocess.Popen([ffmpeg_path(),'-hide_banner','-nostdin',*extra,*map(str,args)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,cwd=cwd)
             self.process=p
-        tail=[];kill_deadline=None
-        # Reading is on a worker, never the GUI thread. Reader drains the pipe to
-        # prevent large/long FFmpeg output from blocking encode or cancellation.
-        chunks=[]
+        chunks=[];kill_deadline=None
         def drain():
-            while True:
-                data=p.stdout.read(4096)
-                if not data:break
-                chunks.append(data)
-                if sum(map(len,chunks))>2_000_000:del chunks[:max(1,len(chunks)//2)]
+            stats={};size=0
+            for data in iter(p.stdout.readline,b''):
+                chunks.append(data);size+=len(data)
+                if size>2_000_000:
+                    del chunks[:max(1,len(chunks)//2)];size=sum(map(len,chunks))
+                if not duration:continue
+                key,sep,value=data.decode('utf-8',errors='replace').strip().partition('=')
+                if key in ('out_time_us','speed','fps','frame'):stats[key]=value
+                if key=='progress':
+                    try:seconds=max(0,min(duration,float(stats.get('out_time_us',0))/1e6))
+                    except ValueError:continue
+                    self.emit('media',seconds=seconds,total=duration,elapsed=time.monotonic()-started,
+                              speed=stats.get('speed',''),fps=stats.get('fps',''),name=label or 'Обработка видео')
         reader=threading.Thread(target=drain,daemon=True);reader.start()
-        while p.poll() is None:
-            if self.cancelled.is_set():
-                if kill_deadline is None:
-                    try:p.terminate()
-                    except OSError:pass
-                    kill_deadline=time.monotonic()+2
-                elif time.monotonic()>kill_deadline:
-                    p.kill()
-            time.sleep(.08)
-        reader.join(3);p.stdout.close()
-        with self.lock:self.process=None
-        self.check();output=b''.join(chunks).decode('utf-8',errors='replace')
-        if p.returncode and not allow_failure:
-            raise RuntimeError('Ошибка обработки видео:\n'+output[-3500:])
-        return output
+        try:
+            while p.poll() is None:
+                if self.cancelled.is_set():
+                    if kill_deadline is None:
+                        try:p.terminate()
+                        except OSError:pass
+                        kill_deadline=time.monotonic()+2
+                    elif time.monotonic()>kill_deadline:p.kill()
+                time.sleep(.08)
+            reader.join();self.check()
+            output=b''.join(chunks).decode('utf-8',errors='replace')
+            if p.returncode and not allow_failure:raise RuntimeError('Ошибка обработки видео:\n'+output[-3500:])
+            if label:self.end(label)
+            return output
+        finally:
+            p.stdout.close()
+            with self.lock:self.process=None
 
 def cache_key(*things):
     return hashlib.sha256(json.dumps(things,sort_keys=True,default=str).encode()).hexdigest()[:24]
@@ -101,7 +118,7 @@ def thumbnail(media,folder,runner=None,at=None,width=640):
 
 def silence_ranges(media,runner,threshold=-36,min_pause=.7):
     if not media.audio:return []
-    out=runner.run(['-i',media.path,'-map','0:a:0','-vn','-af',f'silencedetect=noise={threshold}dB:d={min_pause}','-f','null','-'])
+    out=runner.run(['-i',media.path,'-map','0:a:0','-vn','-af',f'silencedetect=noise={threshold}dB:d={min_pause}','-f','null','-'],duration=media.duration,label='Поиск тишины · '+media.name)
     ranges=[];start=None
     for line in out.splitlines():
         a=re.search(r'silence_start: ([\d.]+)',line);b=re.search(r'silence_end: ([\d.]+)',line)
@@ -114,7 +131,7 @@ def silence_ranges(media,runner,threshold=-36,min_pause=.7):
 def audio_chunk(media,start,duration,path,runner,wav=False):
     args=['-y','-ss',start,'-i',media.path,'-t',duration,'-map','0:a:0','-vn','-ac','1','-ar','16000']
     args+=['-c:a','pcm_s16le'] if wav else ['-c:a','libmp3lame','-b:a','48k']
-    runner.run(args+[str(path)]);return Path(path)
+    runner.run(args+[str(path)],duration=duration,label='Подготовка звука · '+media.name);return Path(path)
 
 def grade_filters(grade,folder=None):
     g=grade;out=[]
@@ -208,12 +225,22 @@ class Renderer:
         workbase=app_dir()/'renders';workbase.mkdir(exist_ok=True)
         # Temporary folder grows on disk, not in RAM; each source is streamed.
         with tempfile.TemporaryDirectory(prefix='render-',dir=workbase) as temp:
-            work=Path(temp);trans=p.transition_lengths();normalized=[]
+            work=Path(temp);trans=p.transition_lengths()+[0];normalized=[]
             total=len(clips);fps=e.fps
+            names=[f'Фрагмент {i+1}/{total} · {p.media_for(c).name}' for i,c in enumerate(clips)]
+            planned=list(names);seconds=[max(2,round(c.duration*fps))/fps for c in clips]
+            for i in range(total):
+                if trans[i] or trans[i+1]:
+                    planned.append(f'Склейки · фрагмент {i+1}/{total}');seconds.append(max(2,round(clips[i].duration*fps))/fps-trans[i]-trans[i+1])
+                if trans[i+1]:
+                    planned.append(f'Переход {i+1} → {i+2}');seconds.append(trans[i+1])
+            planned.append('Сохранение видео · звук и упаковка');seconds.append(p.duration)
+            self.runner.emit('plan',names=planned,seconds=seconds)
             duration_frames=[]
             for i,c in enumerate(clips):
                 self.runner.check();self.progress(int(i/total*65),f'Фрагмент {i+1}/{total} · {p.media_for(c).name}')
                 dst=work/f'clip-{i:05d}.mkv';frames=max(2,round(c.duration*fps));duration_frames.append(frames)
+                self.render_label=names[i]
                 self._normalize(p.media_for(c),c,e,dst,work,frames/fps,preview)
                 normalized.append(dst)
             sequence=[]
@@ -223,11 +250,13 @@ class Renderer:
                 tail=round(trans[i+1]*fps) if i+1<len(trans) else 0
                 if lead or tail:
                     out=work/f'middle-{i:05d}.mkv'
+                    self.render_label=f'Склейки · фрагмент {i+1}/{total}'
                     self._trim(src,out,lead/fps,(duration_frames[i]-lead-tail)/fps,e,work,preview)
                 else:out=src
                 sequence.append(out)
                 if tail:
                     out=work/f'bridge-{i:05d}.mkv';t=tail/fps
+                    self.render_label=f'Переход {i+1} → {i+2}'
                     self._bridge(src,normalized[i+1],out,(duration_frames[i]-tail)/fps,t,clips[i+1].transition,e,work,preview)
                     sequence.append(out)
             listing=work/'sequence.txt';listing.write_text(''.join(f"file '{s.name}'\n" for s in sequence))
@@ -264,7 +293,7 @@ class Renderer:
                     if e.codec=='hevc':args+=['-tag:v','hvc1']
                 args+=[str(tmpout)]
                 self.progress(88,'Сохранение файла · сведение звука и финальная упаковка')
-                self.runner.run(args,cwd=work)
+                self.runner.run(args,cwd=work,duration=p.duration,label='Сохранение видео · звук и упаковка')
                 if tmpout.stat().st_size<500:raise RuntimeError('Экспорт не создал видеофайл')
                 self.runner.check();os.replace(tmpout,destination)
             finally:tmpout.unlink(missing_ok=True)
@@ -299,12 +328,12 @@ class Renderer:
         graph.append(f'[{audio_index}:a:0]'+','.join(af)+'[aud]')
         args+=['-filter_complex_threads','1','-filter_complex',';'.join(graph),'-map',f'[{label}]','-map','[aud]','-t',str(duration)]
         args+=self._encoder(e,preview)+['-c:a','pcm_s16le','-ar','48000','-ac','2','-map_metadata','-1',str(dst)]
-        self.runner.run(args,cwd=work)
+        self.runner.run(args,cwd=work,duration=duration,label=self.render_label)
     def _trim(self,src,dst,start,duration,e,work,preview):
-        self.runner.run(['-y','-i',str(src),'-ss',start,'-t',duration,'-vf',f'setpts=PTS-STARTPTS,fps={e.fps}','-af','asetpts=PTS-STARTPTS',*self._encoder(e,preview),'-c:a','pcm_s16le',str(dst)],cwd=work)
+        self.runner.run(['-y','-i',str(src),'-ss',start,'-t',duration,'-vf',f'setpts=PTS-STARTPTS,fps={e.fps}','-af','asetpts=PTS-STARTPTS',*self._encoder(e,preview),'-c:a','pcm_s16le',str(dst)],cwd=work,duration=duration,label=self.render_label)
     def _bridge(self,a,b,dst,start,duration,transition,e,work,preview):
         graph=f'[0:v]trim=duration={duration},setpts=PTS-STARTPTS,fps={e.fps},settb=AVTB[a];[1:v]trim=duration={duration},setpts=PTS-STARTPTS,fps={e.fps},settb=AVTB[b];[a][b]xfade=transition={transition}:duration={duration}:offset=0[v];[0:a]atrim=duration={duration},asetpts=PTS-STARTPTS[aa];[1:a]atrim=duration={duration},asetpts=PTS-STARTPTS[bb];[aa][bb]acrossfade=d={duration}:c1=tri:c2=tri[au]'
-        self.runner.run(['-y','-ss',start,'-i',str(a),'-i',str(b),'-filter_complex_threads','1','-filter_complex',graph,'-map','[v]','-map','[au]','-t',duration,*self._encoder(e,preview),'-c:a','pcm_s16le',str(dst)],cwd=work)
+        self.runner.run(['-y','-ss',start,'-i',str(a),'-i',str(b),'-filter_complex_threads','1','-filter_complex',graph,'-map','[v]','-map','[au]','-t',duration,*self._encoder(e,preview),'-c:a','pcm_s16le',str(dst)],cwd=work,duration=duration,label=self.render_label)
 
 def color_preview(media,clip,folder,runner=None):
     from .model import Export
