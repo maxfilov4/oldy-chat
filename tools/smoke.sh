@@ -18,6 +18,8 @@ print('PASS: login screen rendered on Android')
 PY
 adb exec-out screencap -p > build/screenshots/01-login.png
 adb install -r build/OldyChat-tests.apk
+# Grant before any authenticated Activity can open the Android permission dialog.
+adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
 export OLDY_TURN_HOST=10.0.2.2 OLDY_TEST_TURN=1
 OLDY_TURN_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 export OLDY_TURN_SECRET
