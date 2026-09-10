@@ -35,7 +35,7 @@ for rate in (8000,44100,48000):
 # Recognition uses the same public model, with the upstream Python API and ffmpeg PCM.
 from vosk import Model,KaldiRecognizer,SetLogLevel
 SetLogLevel(-1)
-baseline={}
+baseline={};metrics={}
 for lang in ('en','ru'):
  model_dir=cache/models[lang]['name']
  if not model_dir.exists():
@@ -49,9 +49,15 @@ for lang in ('en','ru'):
  if lang=='en':assert 'one' in actual and 'zero' in actual,actual
  else:
   import re
-  words=re.findall(r'[а-яё]+',reference.lower());matched=sum(word in actual.split() for word in words)
-  assert matched>=10,(matched,reference,actual)
-(root/'build/speech-reference-results.json').write_text(json.dumps({'source':sample_base,'russian_fixture':'neural synthetic speech with published source sentence','results':baseline},ensure_ascii=False,indent=2))
+  expected=' '.join(re.findall(r'[а-яё]+',reference.lower()))
+  previous=list(range(len(actual)+1))
+  for i,char in enumerate(expected,1):
+   current=[i]
+   for j,other in enumerate(actual,1):current.append(min(current[-1]+1,previous[j]+1,previous[j-1]+(char!=other)))
+   previous=current
+  cer=previous[-1]/len(expected);metrics[lang]={'character_error_rate':cer,'reference':expected,'acceptance':'integration smoke check: CER <= 0.15; not a general recognition accuracy claim'}
+  assert cer<=0.15,(cer,reference,actual)
+(root/'build/speech-reference-results.json').write_text(json.dumps({'source':sample_base,'russian_fixture':'neural synthetic speech with published source sentence','results':baseline,'metrics':metrics},ensure_ascii=False,indent=2))
 print('SPEECH_REFERENCE_PASS: English human speech and Russian neural speech match published references')
 
 notices=root/'app/src/main/assets/third-party';notices.mkdir(parents=True,exist_ok=True)
