@@ -100,6 +100,8 @@ grep -q 'OLDY_CALL_PASS' build/call-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ExperienceInstrumentation > build/experience-results.txt
 cat build/experience-results.txt
 grep -q OLDY_EXPERIENCE_PASS build/experience-results.txt
+# Show the software keyboard even when the emulator exposes a hardware keyboard.
+adb shell settings put secure show_ime_with_hard_keyboard 1
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.WallpaperInstrumentation > build/wallpaper-results.txt
 cat build/wallpaper-results.txt
 grep -q OLDY_WALLPAPER_PASS build/wallpaper-results.txt
