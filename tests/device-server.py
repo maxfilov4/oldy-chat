@@ -14,7 +14,7 @@ spec=importlib.util.spec_from_file_location('device_relay',root/'server/server.p
 # Emulator fixture only. Production owner-key binding is covered by server integration tests.
 relay.creator=lambda nick:nick=='alice'
 mail={}
-relay.mail_code=lambda email,code:mail.__setitem__(email,code)
+relay.mail_code=lambda email,code,**kwargs:mail.__setitem__(email,code)
 call_peer=None
 class TestHandler(relay.Handler):
  def reply(self,obj,status=200):

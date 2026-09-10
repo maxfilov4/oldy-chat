@@ -1,0 +1,96 @@
+{
+  "ru": {
+    "privacy": {
+      "title": "Политика конфиденциальности",
+      "body": [
+        "Oldi Chat обрабатывает данные для создания аккаунта, доставки сообщений, работы каналов, звонков, обновлений и рассмотрения жалоб. Оператор, адрес поддержки и контакт по безопасности детей показаны ниже и в разделе «Правила и поддержка».",
+        "Аккаунт: e-mail, подтверждение владения почтой, @ник, имя, порядковый номер регистрации, публичные ключи, сессии, аватар и описание профиля. Адрес почты не является публичным. Сервер видит участников и время доставки, размеры вложений, сетевые адреса соединений и другую информацию, необходимую для доставки.",
+        "Личные и групповые сообщения шифруются на устройствах участников; сервер хранит зашифрованные конверты. Личные вложения защищены ключами участников. Это не скрывает метаданные и не защищает от взломанного телефона, скриншотов или действий собеседника. Универсального ключа владельца для чтения всей личной переписки нет. Каналы, их комментарии и канальные видео доступны серверу; они не имеют сквозного шифрования. История каналов шифруется при хранении, а ключ находится на сервере.",
+        "Контакты проверяются только по вашему действию и после разрешения Android. Имена контактов и вся адресная книга не загружаются; для поиска совпадений передаются нормализованные адреса e-mail выбранных контактов. Совпадение показывается только для аккаунтов, которые включили обнаружение. Фото, камера и микрофон используются при выборе соответствующей функции.",
+        "Когда вы отправляете жалобу, после отдельного согласия модератор получает ваш @ник, @ник указанного автора, причину, идентификатор сообщения и только показанный вами фрагмент с пояснением. Полная личная переписка автоматически не раскрывается. Не прикладывайте незаконные изображения: укажите ссылку внутри Oldi и описание. Жалобы доступны назначенному модератору и удаляются не позднее 90 дней либо при удалении связанного аккаунта.",
+        "YouTube загружается напрямую с сервисов Google в официальном плеере или вкладке поддерживаемого браузера. Там действуют условия и политика Google; браузер может хранить cookies и историю. Oldi не получает пароль Google и не отправляет YouTube-видеопоток на свой сервер. Локальный DPI-режим после отдельного согласия обрабатывает нужные пакеты на телефоне; это не анонимизирующий удалённый VPN. Диагностика не записывает cookies, токены, сообщения и приватные URL. При резервном DNS-запросе Google получает запрашиваемое доменное имя и сетевой адрес устройства.",
+        "Аудиомастерская, создание стикера из фото и распознавание аудио в текст выполняются на устройстве. Для распознавания может понадобиться загрузка языковой модели; поставщик загрузки увидит обычное сетевое соединение, но не получит аудио. Результаты не отправляются в чат автоматически. Отправка готового стикера или текста происходит только по вашему действию.",
+        "Хостинг хранит необходимые данные Oldi. Если оператор подключил Яндекс Диск, туда могут переноситься медиафайлы приложения; для личных вложений сохраняется шифрование, видео каналов могут храниться без сквозного шифрования. Почтовый поставщик обрабатывает адрес получателя и письмо с кодом. Обязательной рекламной аналитики и продажи личной переписки в этой версии нет. Покупки стикеров отключены.",
+        "Данные аккаунта и облачная история хранятся до удаления вами. Удаление аккаунта доступно здесь и в приложении. Сессии, профиль, почта, ключевые копии, ваша серверная история, публикации и созданные вами сообщества удаляются; удаление медиа на внешнем хранилище выполняется очередью при его доступности. Управляемые резервные снимки сервера очищаются через 30 дней. Журнал удаления хранит отпечаток публичного ключа для предотвращения восстановления удалённого аккаунта из старого снимка. Копии у собеседников, сделанные ими экспорты и независимые резервные копии устройств не могут быть принудительно удалены.",
+        "Вы можете изменить профиль, отключить обнаружение по контактам, отозвать разрешения Android, остановить локальный сетевой режим, выйти или удалить аккаунт. По вопросам доступа, исправления и удаления данных свяжитесь с оператором. Существенные изменения правил потребуют нового согласия перед публикацией."
+      ]
+    },
+    "terms": {
+      "title": "Условия использования",
+      "body": [
+        "Используя Oldi Chat, соблюдайте эти условия и правила сообщества. Перед созданием аккаунта и публикацией требуется явное согласие с актуальной версией. Политика конфиденциальности описывает обработку данных. Согласие не означает отказ от обязательных прав, предоставленных применимым законом.",
+        "Вы отвечаете за доступ к своей почте, сохранность устройства, резервного пароля и ключей. Не выдавайте себя за другое лицо, не используйте чужую учётную запись и не злоупотребляйте механизмами жалоб. Используйте сервис только если имеете необходимый по месту проживания возраст и разрешения. Возрастная аудитория магазина определяется оператором; приложение не объявляется сервисом для детей.",
+        "Публикуйте только материалы, которыми вправе делиться. Создание стикера из чужого фото не передаёт вам права на фотографию, персонажа или образ человека. Не используйте стикеры для травли, обмана или сексуализации несовершеннолетних. Отправляя материал, вы разрешаете его техническое хранение и доставку выбранным получателям в пределах работы сервиса; права собственности остаются у правообладателя.",
+        "Запрещены материалы и действия из правил сообщества. После жалобы модератор может удалить нарушение и ограничить публикации аккаунта. Уведомление о решении доступно в истории жалоб. Обратиться по поводу ограничения можно через поддержку; автоматического чтения всей личной переписки нет.",
+        "Доступность связи, YouTube и локальной DPI-обработки зависит от Android, устройства, сети и правил стороннего сервиса. Нельзя гарантировать воспроизведение в любой стране или сети. Oldi не снимает ограничения возраста, аккаунта или запрет встраивания автора YouTube. Условия YouTube действуют отдельно.",
+        "Покупки и продажа стикеров в этой версии недоступны. До их запуска будут показаны цена, комиссия, условия оплаты и возврата; отдельное согласие потребуется до покупки. Сейчас приложение не принимает оплату за стикеры.",
+        "Вы можете прекратить использование и удалить аккаунт. Порядок и последствия удаления описаны в политике и на экране удаления. Контакт оператора указан в разделе поддержки. Эти условия не отменяют применимые права потребителя."
+      ]
+    },
+    "community": {
+      "title": "Правила сообщества и безопасность детей",
+      "body": [
+        "В Oldi Chat запрещены сексуальная эксплуатация и насилие над детьми, материалы сексуального насилия над детьми (CSAM), вовлечение несовершеннолетнего в сексуальное общение, груминг, сексуальный шантаж и торговля детьми. Запрет распространяется также на рисунки, стикеры и компьютерные изображения. О нарушении сообщите через «Пожаловаться → Безопасность детей».",
+        "Запрещены угрозы и подстрекательство к насилию, травля и преследование, разжигание ненависти, публикация чужих личных данных без разрешения, мошенничество, спам, вредоносные файлы, инструкции для совершения преступлений и нарушение авторских прав. Откровенный сексуальный контент и поощрение опасного поведения несовершеннолетних запрещены.",
+        "Зажмите сообщение → Ещё → Пожаловаться. Жалоба на пользователя доступна в его профиле. Перед отправкой вы увидите данные, передаваемые модератору. Блокировка пользователя доступна отдельно и немедленно останавливает новые личные сообщения и звонки между аккаунтами; она не удаляет аккаунт другого человека.",
+        "Назначенный модератор рассматривает жалобы, приоритетно — обращения о безопасности детей, и может удалить материал, ограничить публикации или отклонить необоснованную жалобу. Фрагмент в жалобе предоставлен отправителем и проверяется перед решением. История жалобы показывает её статус. Апелляции направляются оператору через поддержку.",
+        "При получении подтверждённых сведений о CSAM оператор должен удалить материал и направить сообщение соответствующему уполномоченному органу в соответствии с применимым законом. В приложении нет автоматической отправки жалоб полиции. Ответственный контакт по безопасности детей указан ниже. Не пересылайте незаконный материал повторно: достаточно идентификатора и описания."
+      ]
+    },
+    "delete": {
+      "title": "Удаление аккаунта и данных",
+      "body": [
+        "В приложении: Настройки → Конфиденциальность → Удалить аккаунт. Для подтверждения введите свой @ник. На этой странице можно удалить аккаунт без установки приложения: укажите подтверждённую почту, получите отдельный код удаления и подтвердите необратимое действие. Код входа не подходит.",
+        "Удаляются аккаунт, почта, профиль, сессии, облачная копия ключей, серверная история, ваши публикации и созданные вами сообщества. Их @адреса освобождаются. Аккаунты собеседников сохраняются. Медиа ставятся в очередь удаления, включая подключённый Диск. Снимки управляемых резервных копий удаляются через 30 дней. Копии сообщений и экспорты у других людей могут остаться.",
+        "Если доступа к подтверждённой почте нет, используйте активную сессию в приложении или обратитесь в поддержку для проверки владения аккаунтом. Никогда не отправляйте поддержке пароль, ключи восстановления или код входа. После удаления восстановить аккаунт и созданные им сообщества нельзя."
+      ]
+    }
+  },
+  "en": {
+    "privacy": {
+      "title": "Privacy policy",
+      "body": [
+        "Oldi Chat processes data to create accounts, deliver messages, operate channels and calls, provide updates and review abuse reports. The operator, support address and child safety contact appear below and in Rules and support.",
+        "Account data includes verified email, handle, name, registration number, public keys, sessions, avatar and bio. Email is not public. The server sees participants, delivery times, attachment sizes, network addresses and metadata necessary for delivery.",
+        "Private and group message bodies are encrypted on participant devices and stored as encrypted envelopes. Private attachments use participant keys. This does not hide metadata or protect against compromised devices, screenshots or recipients. The operator has no universal key to private chats. Channels, comments and channel videos are accessible to the server and are not end-to-end encrypted. Channel history is encrypted at rest using a server-held key.",
+        "Contact discovery requires your action and Android permission. Contact names and the entire address book are not uploaded. Normalized email addresses selected for matching are sent to the server; matches appear only for accounts that enabled discovery. Photos, camera and microphone are used when you choose the corresponding feature.",
+        "With separate consent, an abuse report sends your handle, the reported author, reason, message identifier and only the displayed excerpt and your explanation to the designated moderator. The full private chat is not automatically disclosed. Do not attach illegal images; identify the Oldi message and describe the concern. Reports are deleted within 90 days or when a related account is deleted.",
+        "YouTube streams directly from Google services in the official player or a supported browser tab. Google terms and privacy rules apply; the browser can retain cookies and history. Oldi receives neither your Google password nor the YouTube video stream on its server. Optional local DPI processes selected packets on your device after separate consent; it is not an anonymizing remote VPN. Diagnostics do not record cookies, tokens, messages or private URLs. Fallback DNS requests disclose the queried domain and device network address to Google.",
+        "Audio processing, photo sticker creation and audio transcription run on your device. Transcription may require a language model download; its provider receives a normal download connection but no audio. Results are not sent to chats automatically. Sharing a sticker or transcript requires your action.",
+        "Oldi hosting stores data required for messaging. If the operator enables Yandex Disk, media can be moved there: private attachments retain encryption, while channel videos may not be end-to-end encrypted. The mail provider processes the recipient email and verification message. This release has no mandatory advertising analytics or sale of private conversations. Sticker purchases are disabled.",
+        "Account data and cloud history remain until deletion. Delete your account here or in the app. Sessions, profile, email, key backups, your server history, posts and communities you created are removed; external media deletion is queued until storage is reachable. Managed server backup snapshots expire after 30 days. A deletion journal keeps a public-key fingerprint to prevent restoring a deleted account from an old snapshot. Recipient copies, exports and independently managed device backups cannot be forcibly removed.",
+        "You may edit your profile, disable discovery, revoke Android permissions, stop local networking, log out or delete your account. Contact the operator for access, correction or deletion questions. Material policy changes require new agreement before publishing."
+      ]
+    },
+    "terms": {
+      "title": "Terms of use",
+      "body": [
+        "Use Oldi Chat in accordance with these terms and the community rules. Explicit agreement to the current version is required before account creation and publishing. The privacy policy explains data processing. Agreement does not waive mandatory legal rights.",
+        "You are responsible for your email access, device, backup password and keys. Do not impersonate others, access another account or abuse reporting. Use the service only if you meet the age and permission requirements where you live. The operator declares the store audience; this app is not presented as a children's service.",
+        "Share only material you have the right to use. Making a sticker from a photo does not grant rights to the image, character or likeness. Do not use stickers for harassment, deception or sexualizing minors. Sharing permits technical storage and delivery to selected recipients for service operation; ownership remains with the rights holder.",
+        "Content and conduct prohibited by the community rules are not allowed. Moderators can remove violations and restrict an account's publishing. Report outcomes appear in report history. Contact support to appeal restrictions. Private chats are not automatically scanned.",
+        "Connectivity, YouTube and local DPI depend on Android, device, network and third-party rules. Playback in every region or network is not guaranteed. Oldi does not remove age/account restrictions or an author's embedding prohibition. YouTube terms apply separately.",
+        "Sticker purchases and sales are unavailable in this version. Pricing, fees, payment and refund terms will be presented before any future purchase. The app currently accepts no sticker payments.",
+        "You may stop using the service and delete your account. The deletion screen and privacy policy explain its effects. Operator contact details are available in support. These terms do not override applicable consumer rights."
+      ]
+    },
+    "community": {
+      "title": "Community rules and child safety",
+      "body": [
+        "Oldi Chat prohibits child sexual abuse and exploitation (CSAE), child sexual abuse material (CSAM), grooming, sexual extortion and child trafficking. This also covers drawings, stickers and computer-generated depictions. Use Report → Child safety to flag concerns.",
+        "Threats, incitement to violence, harassment, stalking, hate, doxxing, fraud, spam, malicious files, instructions to commit crimes and copyright infringement are prohibited. Explicit sexual content and encouraging dangerous behavior by minors are prohibited.",
+        "Long-press a message → More → Report. User profiles also provide reporting. Review the disclosed data before submitting. Blocking is separate and immediately prevents new private messages and calls between the accounts; it does not delete the other person's account.",
+        "The designated moderator reviews reports with priority for child safety and may remove content, restrict publishing or dismiss unfounded reports. Reporter-provided excerpts require verification before action. Report history shows the outcome. Contact operator support for appeals.",
+        "When the operator obtains actual knowledge of CSAM, they must remove it and report to the appropriate authority as required by applicable law. The app does not automatically send police reports. The child safety contact appears below. Do not re-share illegal material; identify the message and describe the concern."
+      ]
+    },
+    "delete": {
+      "title": "Delete account and data",
+      "body": [
+        "In the app: Settings → Privacy → Delete account. Confirm by entering your handle. On this page you can delete without reinstalling: provide your verified email, receive a separate deletion code and confirm the irreversible action. Login codes cannot be used here.",
+        "Deletion removes the account, email, profile, sessions, cloud key backup, server history, your posts and communities you created. Their handles become available. Other people's accounts remain. Media is queued for deletion, including connected Disk storage. Managed backup snapshots expire after 30 days. Recipients' copies and exports may remain.",
+        "If you cannot access the verified email, use an active app session or contact support to verify ownership. Never send support your password, recovery keys or login code. Deleted accounts and their communities cannot be restored."
+      ]
+    }
+  }
+}

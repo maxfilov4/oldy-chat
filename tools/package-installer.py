@@ -3,7 +3,7 @@ import base64,io,tarfile
 root=Path(__file__).resolve().parents[1]
 buf=io.BytesIO()
 with tarfile.open(fileobj=buf,mode='w:gz') as t:
- for f in ('server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py'):t.add(root/'server'/f,arcname=f)
+ for f in ('server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py'):t.add(root/'server'/f,arcname=f)
 payload=base64.b64encode(buf.getvalue()).decode()
 command="""python3 - <<'OLDY_INSTALL'
 import base64,io,tarfile,tempfile,subprocess,os

@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
- <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+ <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36"/>
  <application android:label="Oldy tests"/>
  <instrumentation android:name="chat.oldy.CryptoInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.FeatureInstrumentation" android:targetPackage="chat.oldy"/>
@@ -17,4 +17,4 @@
  <instrumentation android:name="chat.oldy.YouTubeInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.LocalTunnelInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.UpgradeInstrumentation" android:targetPackage="chat.oldy"/>
-</manifest>
+<instrumentation android:name="chat.oldy.SpeechInstrumentation" android:targetPackage="chat.oldy" /><instrumentation android:name="chat.oldy.LegalUiInstrumentation" android:targetPackage="chat.oldy" /></manifest>

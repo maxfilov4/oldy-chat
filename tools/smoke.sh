@@ -40,6 +40,12 @@ adb shell pm grant chat.oldy android.permission.RECORD_AUDIO
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpgradeInstrumentation > build/upgrade-results.txt
 cat build/upgrade-results.txt
 grep -q OLDI_UPGRADE_PASS build/upgrade-results.txt
+timeout 240s adb shell am instrument -w chat.oldy.tests/chat.oldy.SpeechInstrumentation > build/speech-results.txt
+cat build/speech-results.txt
+grep -q OLDI_SPEECH_PASS build/speech-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.LegalUiInstrumentation > build/legal-ui-results.txt
+cat build/legal-ui-results.txt
+grep -q OLDI_LEGAL_UI_PASS build/legal-ui-results.txt
 # Verify the new wallpaper and contacts flows before the remaining regression suites.
 # Show the software keyboard even when the emulator exposes a hardware keyboard.
 adb shell settings put secure show_ime_with_hard_keyboard 1

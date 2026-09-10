@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 
 final class Vault {
  AtomicFile file;final Context context;
- JSONObject data;
+ volatile boolean erased;JSONObject data;
  String committed,lastMessages="";long roomsRevision,messageRevision;
  Vault(Context c)throws Exception{this(c,null,false);}
  Vault(Context c,String account,boolean fresh)throws Exception {
@@ -33,9 +33,16 @@ final class Vault {
  synchronized void activate()throws Exception{java.nio.file.Files.write(new File(context.getFilesDir(),"active-account").toPath(),Crypto.bytes(nick().isEmpty()?"-":nick()));}
  static Vault guest(Context c)throws Exception{Vault v=new Vault(c,"",true);v.activate();return v;}
  synchronized void save()throws Exception {
+  if(erased)throw new IOException("Account deleted");
   FileOutputStream out=null;
   try{byte[] bytes=Crypto.sealLocal(Crypto.bytes(data.toString()));out=file.startWrite();out.write(bytes);file.finishWrite(out);committed=data.toString();String messages=data.optJSONArray("messages").toString();if(!messages.equals(lastMessages)){lastMessages=messages;messageRevision++;}}catch(Exception e){if(out!=null)file.failWrite(out);data=new JSONObject(committed);throw e;}
  }
+ synchronized void erase()throws Exception{
+  String account=nick();JSONArray messages=data.optJSONArray("messages");if(messages!=null)for(int i=0;i<messages.length();i++){JSONObject m=messages.optJSONObject(i);if(m!=null&&m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}}
+  erased=true;file.delete();for(String name:new String[]{"history.vault","legacy-before-isolation.vault"}){File legacy=new File(context.getFilesDir(),name);if(legacy.isFile())try{JSONObject old=new JSONObject(new String(Crypto.openLocal(java.nio.file.Files.readAllBytes(legacy.toPath())),StandardCharsets.UTF_8));if(account.equals(old.optString("nick")))new AtomicFile(legacy).delete();}catch(Exception ignored){}}
+  eraseTree(new File(context.getFilesDir(),"personal-stickers/"+account));new AtomicFile(new File(context.getFilesDir(),"video-library/"+account+".vault")).delete();data=empty();
+ }
+ static void eraseTree(File file){File[] items=file.listFiles();if(items!=null)for(File child:items)eraseTree(child);file.delete();}
  synchronized long messageRevision(){return messageRevision;}
  synchronized JSONObject copy()throws Exception{return new JSONObject(data.toString());}
  synchronized JSONObject identity()throws Exception{
@@ -47,14 +54,14 @@ final class Vault {
   JSONObject u=reply.getJSONObject("user");
   if(!nick().isEmpty()&&!nick().equals(u.getString("nick")))throw new Exception(I18n.t("Данные принадлежат другому аккаунту"));
   if(!Crypto.fingerprint(u).equals(Crypto.fingerprint(identity())))throw new Exception(I18n.t("Для этого аккаунта нужна резервная копия с прежнего телефона. Восстановите её в настройках."));
-  File enrollment=file.getBaseFile();data.put("nick",u.getString("nick")).put("name",u.getString("name")).put("token",reply.getString("token")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email"));file=new AtomicFile(accountFile(nick()));save();activate();if(enrollment.getName().startsWith("enroll-"))enrollment.delete();
+  File enrollment=file.getBaseFile();data.put("nick",u.getString("nick")).put("name",u.getString("name")).put("token",reply.getString("token")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email")).put("accepted_policy",u.optString("accepted_policy"));file=new AtomicFile(accountFile(nick()));save();activate();if(enrollment.getName().startsWith("enroll-"))enrollment.delete();
  }
  synchronized boolean archived(String target)throws Exception{return bucket("archived_chats").optBoolean(target);}
  synchronized void archiveChat(String target,boolean value)throws Exception{bucket("archived_chats").put(target,value);save();}
  synchronized JSONArray chatMessageIds(String peer)throws Exception{JSONArray ids=new JSONArray(),messages=data.getJSONArray("messages");for(int i=0;i<messages.length();i++){JSONObject m=messages.getJSONObject(i);if(m.optString("peer").equals(peer))ids.put(m.getString("id"));}return ids;}
  synchronized void clearChat(String peer,long through)throws Exception{
   if(through<=bucket("chat_clears").optLong(peer))return;bucket("chat_clears").put(peer,through);JSONArray old=data.getJSONArray("messages"),keep=new JSONArray();boolean newer=false;
-  for(int i=0;i<old.length();i++){JSONObject m=old.getJSONObject(i);if(m.optString("peer").equals(peer)&&m.optLong("time")<=through){String id=m.optString("id");bucket("deleted_posts").put(id,true);bucket("saved").remove(id);bucket("reactions").remove(id);if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}}else{keep.put(m);if(m.optString("peer").equals(peer))newer=true;}}
+  for(int i=0;i<old.length();i++){JSONObject m=old.getJSONObject(i);if(m.optString("peer").equals(peer)&&m.optLong("time")<=through){String id=m.optString("id");bucket("deleted_posts").put(id,true);bucket("saved").remove(id);bucket("transcripts").remove(id);bucket("reactions").remove(id);if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}}else{keep.put(m);if(m.optString("peer").equals(peer))newer=true;}}
   data.put("messages",keep);bucket("drafts").remove(peer);bucket("pins").remove(peer);bucket("archived_chats").remove(peer);if(!newer)bucket("hidden_chats").put(peer,true);save();
  }
  synchronized void leaveRoom(String rid)throws Exception{String peer="room:"+rid;clearChat(peer,System.currentTimeMillis());data.getJSONObject("rooms").remove(rid);bucket("channel_cursors").remove(rid);roomsRevision++;save();}
@@ -67,7 +74,7 @@ final class Vault {
   if(old!=null&&!Crypto.fingerprint(old).equals(Crypto.fingerprint(peer)))throw new Exception(I18n.t("Ключ @")+n+I18n.t(" изменился. Передача остановлена."));
   if(old==null||!old.toString().equals(peer.toString())){data.getJSONObject("contacts").put(n,peer);save();}
  }
- synchronized void profile(JSONObject u)throws Exception{data.put("name",u.getString("name")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email"));save();}
+ synchronized void profile(JSONObject u)throws Exception{data.put("name",u.getString("name")).put("avatar",u.optString("avatar","preset:0")).put("bio",u.optString("bio")).put("email",u.optString("email")).put("email_verified",u.optBoolean("email_verified")).put("creator_video",u.optBoolean("creator_video")).put("moderator",u.optBoolean("moderator")).put("account_number",u.optLong("account_number")).put("registered_at",u.optLong("registered_at")).put("pending_email",u.optString("pending_email")).put("accepted_policy",u.optString("accepted_policy"));save();}
  synchronized void rooms(JSONArray rooms)throws Exception{JSONObject next=new JSONObject();for(int i=0;i<rooms.length();i++){JSONObject r=rooms.getJSONObject(i);next.put(r.getString("id"),r);}data.put("rooms",next);save();roomsRevision++;}
  synchronized JSONObject room(String id)throws Exception{return data.getJSONObject("rooms").optJSONObject(id);}
  synchronized void putRoom(JSONObject r)throws Exception{data.getJSONObject("rooms").put(r.getString("id"),r);save();roomsRevision++;}
@@ -98,7 +105,7 @@ final class Vault {
   JSONArray a=data.getJSONArray("messages"),keep=new JSONArray();java.util.ArrayList<String> removed=new java.util.ArrayList<>();
   for(int i=0;i<a.length();i++){JSONObject m=a.getJSONObject(i);String peer=m.optString("peer");boolean drop=whole&&Conversation.community(peer)&&Conversation.room(peer).equals(rid)||!whole&&(m.optString("id").equals(mid)||peer.equals("thread:"+rid+":"+mid));
    if(m.optString("kind").equals("control")&&m.optJSONObject("control")!=null&&m.optJSONObject("control").optString("mid").equals(mid))drop=true;
-   if(drop){removed.add(m.optString("id"));if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}bucket("saved").remove(m.optString("id"));bucket("reactions").remove(m.optString("id"));}
+   if(drop){removed.add(m.optString("id"));if(m.has("local"))try{MediaFiles.path(context,m.getString("local")).delete();}catch(Exception ignored){}bucket("saved").remove(m.optString("id"));bucket("transcripts").remove(m.optString("id"));bucket("reactions").remove(m.optString("id"));}
    else{JSONObject reply=m.optJSONObject("reply");if(reply!=null&&reply.optString("id").equals(mid))reply.put("text",I18n.t("Публикация удалена"));keep.put(m);}
   }
   data.put("messages",keep);for(String id:removed)bucket("deleted_posts").put(id,true);

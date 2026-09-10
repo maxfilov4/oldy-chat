@@ -20,6 +20,7 @@ final class ThemeLayout extends LinearLayout {
  ThemeLayout(Context c){this(c,Notices.prefs(c).getString("theme","dark").equals("light"),Notices.prefs(c).getString("theme","dark").equals("cyber"));}
  ThemeLayout(Context c,boolean light,boolean cyber){super(c);setOrientation(VERTICAL);backdrop=new ThemeBackdrop(c,light,cyber);setBackground(backdrop);}
  void animateSurface(boolean active){running=active;removeCallbacks(tick);if(active&&isAttachedToWindow())post(tick);}
+ protected void onLayout(boolean changed,int left,int top,int right,int bottom){super.onLayout(changed,left,top,right,bottom);PressFeedback.walk(this);}
  protected void onAttachedToWindow(){super.onAttachedToWindow();animateSurface(true);}
  protected void onDetachedFromWindow(){animateSurface(false);backdrop.release();super.onDetachedFromWindow();}
  protected void onWindowVisibilityChanged(int visibility){super.onWindowVisibilityChanged(visibility);if(backdrop!=null)animateSurface(visibility==View.VISIBLE);}

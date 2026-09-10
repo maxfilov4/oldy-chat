@@ -7,7 +7,7 @@ import org.json.*;
 import java.util.concurrent.*;
 public class ChatService extends Service {
  static volatile ChatService instance;static volatile String state="Нет подключения";static volatile String visibleChat="";
- volatile boolean running;Thread incoming,outgoing;Vault vault;Api api;Rtc rtc;PowerManager.WakeLock wake;ConnectivityManager.NetworkCallback callback;
+ volatile boolean running,refreshRequested;Thread incoming,outgoing;Vault vault;Api api;Rtc rtc;PowerManager.WakeLock wake;ConnectivityManager.NetworkCallback callback;
  final ExecutorService signals=Executors.newFixedThreadPool(3);static Vault shared;
  static synchronized Vault vault(Context c)throws Exception{if(shared==null)shared=new Vault(c.getApplicationContext());return shared;}
  static void changed(Context c){c.sendBroadcast(new Intent("chat.oldy.CHANGED").setPackage(c.getPackageName()));}
@@ -16,7 +16,7 @@ public class ChatService extends Service {
   callForeground(false,"");
   wake=getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"oldy:delivery");wake.setReferenceCounted(false);
   rtc=new Rtc(this,vault,(peer,body)->signal(peer,body));
-  callback=new ConnectivityManager.NetworkCallback(){public void onAvailable(Network n){Api.live="";changed(ChatService.this);}};
+  callback=new ConnectivityManager.NetworkCallback(){public void onAvailable(Network n){Api.live="";requestSync();changed(ChatService.this);}public void onLost(Network n){state="Нет подключения";changed(ChatService.this);}};
   getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(callback);
   running=true;incoming=new Thread(this::receive,"oldy-in");outgoing=new Thread(this::send,"oldy-out");incoming.start();outgoing.start();
  }
@@ -61,9 +61,10 @@ public class ChatService extends Service {
  void sync()throws Exception{
   try{api.call("/capabilities",new JSONObject().put("protocol",4),vault.token());long revision=vault.roomRevision();vault.syncRooms(api.call("/rooms",null,vault.token()).getJSONArray("rooms"),revision);vault.profile(api.call("/me",null,vault.token()));vault.blocks(api.call("/blocks",null,vault.token()).getJSONArray("blocked"));deletionSync();try{JSONArray cleared=api.call("/chats/cleared",null,vault.token()).getJSONArray("items");for(int i=0;i<cleared.length();i++){JSONObject c=cleared.getJSONObject(i);vault.clearChat(c.getString("peer"),c.getLong("through_ms"));}}catch(Api.Failure e){if(e.status!=404)throw e;}cloudSync();JSONObject rooms=vault.copy().getJSONObject("rooms");java.util.Iterator<String> roomIds=rooms.keys();while(roomIds.hasNext()){String rid=roomIds.next();try{ChannelHistory.syncRoom(api,vault,rid,4);}catch(Api.Failure e){if(e.status!=403&&e.status!=404)throw e;}}}catch(Api.Failure e){if(e.status!=404)throw e;}
  }
+ void requestSync(){refreshRequested=true;if(api!=null)api.interruptPoll();}
  void send(){long lastSync=0;while(running){try{
    if(vault.token().isEmpty()){pause(3000);continue;}
-   if(System.currentTimeMillis()-lastSync>10000){sync();lastSync=System.currentTimeMillis();changed(this);}
+   if(refreshRequested||System.currentTimeMillis()-lastSync>10000){refreshRequested=false;sync();lastSync=System.currentTimeMillis();changed(this);}
    JSONArray a=vault.copy().getJSONArray("messages");int archived=0,channelArchived=0;
    for(int i=0;i<a.length()&&running;i++){JSONObject m=a.getJSONObject(i);if(!vault.has(m.optString("id")))continue;if(m.optBoolean("out")&&!m.optBoolean("registered")&&!m.optString("kind").equals("control")){try{register(api,vault,m);vault.markRegistered(m.getString("id"));}catch(Api.Failure e){if(e.status==410){deletionSync();continue;}if(e.status!=404)continue;}}if(!m.optBoolean("channel_saved")&&ChannelHistory.belongs(vault,m)&&channelArchived++<20){try{ChannelHistory.publish(api,vault,m);}catch(Exception retryLater){}}if(!m.optBoolean("cloud")&&!m.optString("status").equals("pending")&&archived++<10){try{api.call("/history/store",new JSONObject().put("envelope",vault.archiveEnvelope(m)),vault.token());vault.cloudSaved(m.getString("id"));}catch(Exception ignored){}}if(!m.optString("status").equals("pending"))continue;
     JSONObject envelopes=m.optJSONObject("envelopes");if(envelopes==null){envelopes=new JSONObject();if(m.has("envelope"))envelopes.put(m.getString("peer"),m.getJSONObject("envelope"));}

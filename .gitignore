@@ -10,3 +10,6 @@ __pycache__/
 *.sqlite3*
 *.pem
 *.key
+
+app/src/main/assets/speech-models.json
+tests/assets/speech/

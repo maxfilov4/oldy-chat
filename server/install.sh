@@ -4,7 +4,7 @@ set -euo pipefail
 if [[ $(id -u) != 0 ]]; then echo 'Run this installer as root.'; exit 1; fi
 oldy_src="$(cd "$(dirname "$0")" && pwd)"
 if [[ ! -f "$oldy_src/server.py" ]]; then echo 'server.py is missing'; exit 1; fi
-python3 -m py_compile "$oldy_src/server.py"
+python3 -m py_compile "$oldy_src/server.py" "$oldy_src/legal_service.py"
 # Make a consistent SQLite snapshot before an additive migration.
 oldy_backup="/var/backups/oldy-chat/$(date -u +%Y%m%d-%H%M%S)"
 install -d -m 700 "$oldy_backup"
@@ -37,6 +37,25 @@ install -d -o root -g root -m 755 /opt/oldy-chat
 install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
 install -d -o root -g oldy-chat -m 750 /etc/oldy-chat
 install -o root -g root -m 644 "$oldy_src/server.py" /opt/oldy-chat/server.py
+for oldy_legal_file in legal_service.py legal_texts.json configure-legal.py retention.py; do
+ install -o root -g root -m 644 "$oldy_src/$oldy_legal_file" "/opt/oldy-chat/$oldy_legal_file"
+done
+cat > /etc/systemd/system/oldy-retention.service <<'RETENTION'
+[Unit]
+Description=Expire managed Oldi backup snapshots after 30 days
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/oldy-chat/retention.py
+RETENTION
+cat > /etc/systemd/system/oldy-retention.timer <<'RETENTION'
+[Unit]
+Description=Daily Oldi backup retention
+[Timer]
+OnCalendar=daily
+Persistent=true
+[Install]
+WantedBy=timers.target
+RETENTION
 if [[ -f "$oldy_src/configure-mail.py" ]]; then install -o root -g root -m 700 "$oldy_src/configure-mail.py" /opt/oldy-chat/configure-mail.py; fi
 install -o root -g root -m 644 "$oldy_src/disk_storage.py" /opt/oldy-chat/disk_storage.py
 install -o root -g root -m 700 "$oldy_src/configure-disk.py" /opt/oldy-chat/configure-disk.py
@@ -68,6 +87,7 @@ Group=oldy-chat
 Environment=OLDY_DATA=/var/lib/oldy-chat
 EnvironmentFile=-/etc/oldy-chat/owner.env
 EnvironmentFile=-/etc/oldy-chat/mail.env
+EnvironmentFile=-/etc/oldy-chat/legal.env
 EnvironmentFile=-/etc/oldy-chat/disk.env
 EnvironmentFile=-/etc/oldy-chat/turn.env
 ExecStart=/usr/bin/python3 /opt/oldy-chat/server.py --cert /etc/oldy-chat/server.crt --key /etc/oldy-chat/server.key --also-443
@@ -101,6 +121,8 @@ print('APK installed for in-app updates:',info['version_name'])
 PYRELEASE
 fi
 systemctl daemon-reload
+systemctl enable --now oldy-retention.timer
+python3 /opt/oldy-chat/retention.py
 systemctl enable --now oldy-chat
 systemctl restart oldy-chat
 if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then ufw allow 8443/tcp comment 'Oldy Chat'; ufw allow 443/tcp comment 'Oldy Chat HTTPS'; ufw allow 3478/udp comment 'Oldy Chat direct media'; fi
@@ -176,6 +198,8 @@ MemoryMax=96M
 WantedBy=multi-user.target
 UNIT
  systemctl daemon-reload
+systemctl enable --now oldy-retention.timer
+python3 /opt/oldy-chat/retention.py
  systemctl enable --now oldy-stun
  systemctl restart oldy-stun
  if command -v ufw >/dev/null && ufw status | head -1 | grep -q 'Status: active'; then

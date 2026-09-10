@@ -13,6 +13,9 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from disk_storage import YandexDisk,DiskError
+import legal_service
+from types import SimpleNamespace
+def legal_context():return SimpleNamespace(**globals())
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.primitives import hashes
@@ -105,8 +108,10 @@ def init_db(path=None):
   e=json.loads(raw)
   if e.get('action','publish') in ('publish','comment'):
    DB.execute('INSERT OR IGNORE INTO posts(mid,room,author,thread) VALUES(?,?,?,?)',(e['id'],e.get('room',''),e['from'],e.get('thread','')))
+ legal_service.init(legal_context())
  DB.commit()
  collect_media()
+ legal_service.replay(legal_context())
 
 def free_room_handle(kind,rid):
  base=kind+'_'+rid.replace('-','')[:12];h=base
@@ -131,6 +136,7 @@ def private_account(nick):
  with LOCK:r=DB.execute('SELECT email,verified FROM emails WHERE nick=?',(nick,)).fetchone()
  with LOCK:pending=DB.execute('SELECT email FROM pending_emails WHERE nick=?',(nick,)).fetchone()
  result['pending_email']=pending[0] if pending else ''
+ with LOCK:result['accepted_policy']=legal_service.accepted(legal_context(),nick)
  result.update(email=r[0] if r else '',email_verified=bool(r and r[1]),creator_video=creator(nick),moderator=creator(nick))
  return result
 
@@ -556,7 +562,7 @@ def avatar_value(data):
   with open(path,'xb') as f:f.write(clean)
  return 'photo:'+key
 
-def mail_code(email,code):
+def mail_code(email,code,purpose="login"):
  import smtplib
  from email.message import EmailMessage
  host=os.environ.get('OLDY_SMTP_HOST','');sender=os.environ.get('OLDY_SMTP_FROM','')
@@ -567,8 +573,11 @@ def mail_code(email,code):
  msg=EmailMessage();msg['Subject']='Oldy Chat — код / code';msg['From']=formataddr(('Oldy Chat',address));msg['To']=email
  msg['Date']=formatdate(localtime=False,usegmt=True);msg['Message-ID']=make_msgid(domain=address.rsplit('@',1)[1]);msg['Auto-Submitted']='auto-generated'
  msg.set_content('Ваш код для Oldy Chat: '+code+'\n\nКод действует 10 минут. Введите его в приложении.\nЕсли вы не запрашивали код, просто проигнорируйте это письмо.\n\nYour Oldy Chat code: '+code+'\nThis code expires in 10 minutes. Enter it in the app. If you did not request it, ignore this email.',charset='utf-8')
+ if purpose=='delete':
+  msg.replace_header('Subject','Oldi Chat — удаление аккаунта / account deletion')
+  msg.set_content('Код УДАЛЕНИЯ аккаунта Oldi Chat: '+code+'\nЭтот код удалит аккаунт и данные без восстановления. Не вводите его для входа. Если вы не просили удаления, проигнорируйте письмо. Код действует 10 минут.\n\nOldi Chat account DELETION code: '+code+'\nThis deletes your account and data permanently. Do not use it to sign in. Ignore if you did not request deletion. Expires in 10 minutes.',charset='utf-8')
  try:
-  port=int(os.environ.get('OLDY_SMTP_PORT','587'));tls=ssl.create_default_context()
+  port=int(os.environ.get('OLDY_SMTP_PORT' ,'587'));tls=ssl.create_default_context()
   smtp=smtplib.SMTP_SSL(host,port,context=tls,timeout=15) if port==465 else smtplib.SMTP(host,port,timeout=15)
   with smtp:
    if port!=465:smtp.starttls(context=tls)
@@ -610,7 +619,7 @@ class Handler(BaseHTTPRequestHandler):
    rate(('allvideo' if path.startswith('/video') else 'all',self.client_address[0]),2400 if path.startswith('/video') else 600,60)
    data={}
    if path.startswith('/video-chunk/') and post:
-    nick=self.user();item=video_record(path[13:],nick,True)
+    nick=self.user();legal_service.require(legal_context(),nick,path);item=video_record(path[13:],nick,True)
     if item['ready']:raise Problem(409,'Видео уже загружено')
     if self.headers.get('Transfer-Encoding'):raise Problem(400,'Неверный запрос')
     try:n=int(self.headers.get('Content-Length','0'));offset=int(self.headers.get('X-Upload-Offset','-1'))
@@ -663,6 +672,7 @@ class Handler(BaseHTTPRequestHandler):
     try:data=json.loads(self.rfile.read(n))
     except Exception:raise Problem(400,'Некорректный JSON')
     if not isinstance(data,dict):raise Problem(400,'Некорректный запрос')
+   if legal_service.public(legal_context(),self,path,post,data):return
    if path=='/health' and not post:return self.reply({'service':'oldy-chat','version':4,'history':'encrypted-cloud-and-devices'})
    if path=='/updates' and not post:
     release=ROOT/'releases'/'release.json';apk=ROOT/'releases'/'OldyChat-latest.apk'
@@ -735,6 +745,7 @@ class Handler(BaseHTTPRequestHandler):
      nick=email_row[0] if email_row else 'unknown_email_login'
     if not NICK.fullmatch(nick) or not isinstance(password,str) or not 8<=len(password)<=128:raise Problem(400,'Ник: 3–24 латинских символа, цифры или _. Пароль: 8–128 символов')
     if path=='/register':
+     if data.get('policy_version')!=legal_service.VERSION:raise Problem(428,'Примите условия и правила сообщества перед регистрацией')
      rate(('register',self.client_address[0]),5,3600)
      email=email_value(data.get('email',''));ticket=str(data.get('ticket',''));code=str(data.get('code',''));ticket_hash=hashlib.sha256(ticket.encode()).hexdigest()
      with LOCK:
@@ -755,6 +766,7 @@ class Handler(BaseHTTPRequestHandler):
        if not DB.execute('SELECT 1 FROM signup_codes WHERE ticket=?',(ticket_hash,)).fetchone():raise Problem(400,'Код уже использован')
        DB.execute('INSERT INTO handles VALUES(?,?,?)',(nick,'user',nick))
        DB.execute('INSERT INTO users VALUES(?,?,?,?,?,?)',(nick,name,salt,hashed,enc,sig))
+       DB.execute('INSERT INTO agreements VALUES(?,?,?)',(nick,legal_service.VERSION,int(time.time())))
        if email:DB.execute('INSERT INTO emails(email,nick,verified) VALUES(?,?,1)',(email,nick))
        if data.get('email_only') is True:DB.execute('INSERT OR IGNORE INTO email_login_accounts VALUES(?)',(nick,))
        DB.execute('DELETE FROM signup_codes WHERE ticket=?',(ticket_hash,))
@@ -769,6 +781,9 @@ class Handler(BaseHTTPRequestHandler):
      if not r or not hmac.compare_digest(candidate,r[1]):raise Problem(401,'Неверный ник или пароль')
     return self.reply({'token':issue_session(nick),'user':private_account(nick)})
    nick=self.user()
+   legal_result=legal_service.api(legal_context(),self,path,post,data,nick)
+   if legal_result is not None:return self.reply(legal_result)
+   if post:legal_service.require(legal_context(),nick,path)
    if path=='/call-config' and post:
     peer=str(data.get('peer',''));public_user(peer)
     if peer==nick:raise Problem(400,'Выберите другого участника')
@@ -1308,10 +1323,17 @@ def main():
  p=argparse.ArgumentParser();p.add_argument('--host',default='0.0.0.0');p.add_argument('--port',type=int,default=8443);p.add_argument('--cert');p.add_argument('--key');p.add_argument('--test-http',action='store_true');p.add_argument('--also-443',action='store_true');a=p.parse_args()
  if a.test_http and a.host not in ('127.0.0.1','::1'):p.error('Test HTTP is localhost-only')
  if not a.test_http and not(a.cert and a.key):p.error('TLS certificate and key required')
- init_db();srv=Relay((a.host,a.port),Handler)
+ init_db();threading.Thread(target=legal_service.maintenance,args=(legal_context(),),daemon=True).start();srv=Relay((a.host,a.port),Handler)
  if DISK is not None:threading.Thread(target=storage_worker,daemon=True).start()
  if not a.test_http:
   tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.minimum_version=ssl.TLSVersion.TLSv1_2;tls.load_cert_chain(a.cert,a.key);srv.tls=tls
+  public_host=os.environ.get('OLDY_PUBLIC_HOST','')
+  if public_host:
+   if not re.fullmatch(r'[a-zA-Z0-9.-]{3,253}',public_host):raise RuntimeError('Invalid public hostname')
+   public_tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);public_tls.minimum_version=ssl.TLSVersion.TLSv1_2;public_tls.load_cert_chain(os.environ['OLDY_PUBLIC_CERT'],os.environ['OLDY_PUBLIC_KEY'])
+   def choose_certificate(sock,name,initial):
+    if name and name.lower()==public_host.lower():sock.context=public_tls
+   tls.set_servername_callback(choose_certificate)
  if a.also_443:
   second=Relay((a.host,443),Handler);second.tls=srv.tls
   threading.Thread(target=second.serve_forever,daemon=True).start()

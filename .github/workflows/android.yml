@@ -26,14 +26,14 @@ jobs:
       - name: Android SDK
         uses: android-actions/setup-android@v4
       - name: Install Android build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+        run: sdkmanager 'platforms;android-36' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
       - name: Prepare isolated call relay and video tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y coturn ffmpeg
+          sudo apt-get install -y coturn ffmpeg espeak-ng
           sudo systemctl stop coturn
       - name: Server tests
         run: |
@@ -72,6 +72,9 @@ jobs:
           name: OldyChat-beta
           path: |
             build/OldyChat-beta.apk
+            build/OldyChat-Play.aab
+            build/speech-results.txt
+            build/legal-ui-results.txt
             build/Server-maintenance-only.txt
             build/OldyChat-0.6.1-server.tar.gz
             build/release/release.json

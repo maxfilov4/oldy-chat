@@ -9,7 +9,7 @@ class RelayTest(unittest.TestCase):
  def setUpClass(cls):
   cls.temp=tempfile.TemporaryDirectory();os.environ['OLDY_DATA']=cls.temp.name
   spec=importlib.util.spec_from_file_location('relay',Path(__file__).resolve().parents[1]/'server/server.py');cls.mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.mod)
-  cls.mail={};cls.mod.mail_code=lambda email,code:cls.mail.__setitem__(email,code)
+  cls.mail={};cls.mod.mail_code=lambda email,code,**kwargs:cls.mail.__setitem__(email,code)
   cls.mod.init_db();cls.server=cls.mod.Relay(('127.0.0.1',0),cls.mod.Handler);threading.Thread(target=cls.server.serve_forever,daemon=True).start();cls.url='http://127.0.0.1:'+str(cls.server.server_port)
   enc=rsa.generate_private_key(public_exponent=65537,key_size=3072).public_key();cls.signing=ec.generate_private_key(ec.SECP256R1());sig=cls.signing.public_key()
   cls.keys={k:base64.b64encode(v.public_bytes(Encoding.DER,PublicFormat.SubjectPublicKeyInfo)).decode() for k,v in [('enc',enc),('sig',sig)]}
@@ -20,6 +20,7 @@ class RelayTest(unittest.TestCase):
  def tearDownClass(cls):cls.server.shutdown();cls.server.server_close();cls.mod.DB.close();cls.temp.cleanup()
  @classmethod
  def request(cls,path,body=None,token=''):
+  if path=='/register' and body is not None:body=dict(body);body.setdefault('policy_version',cls.mod.legal_service.VERSION)
   if path=='/register' and body is not None and 'ticket' not in body:
    body=dict(body);email=body.setdefault('email',body['nick']+'@example.test');status,challenge=cls.request('/signup/request',{'email':email})
    if status!=200:return status,challenge
@@ -579,5 +580,72 @@ class RelayTest(unittest.TestCase):
   vid=item['id'];path=folder/(vid+'.mp4');path.write_bytes(b'y'*32)
   with self.mod.LOCK:self.mod.DB.execute('UPDATE videos SET ready=1,received=32 WHERE id=?',(vid,));self.mod.DB.commit()
   self.assertEqual(self.request('/videos/cancel',{'id':vid},self.tokens['alice'])[0],200);self.assertFalse(path.exists())
+
+ def test_legal_acceptance_and_documents(self):
+  self.assertEqual(self.request('/register',{'nick':'terms_missing','password':'correct password','policy_version':'wrong',**self.keys})[0],428)
+  with self.mod.LOCK:self.mod.DB.execute('DELETE FROM agreements WHERE nick=?',('alice',));self.mod.DB.commit()
+  try:
+   self.assertEqual(self.request('/room/create',{'kind':'group','title':'Not accepted'},self.tokens['alice'])[0],428)
+   self.assertEqual(self.request('/legal/accept',{'version':self.mod.legal_service.VERSION,'accept':False},self.tokens['alice'])[0],400)
+   self.assertEqual(self.request('/legal/accept',{'version':self.mod.legal_service.VERSION,'accept':True},self.tokens['alice'])[0],200)
+   self.assertEqual(self.request('/legal/status',token=self.tokens['alice'])[1]['accepted_version'],self.mod.legal_service.VERSION)
+  finally:
+   with self.mod.LOCK:self.mod.DB.execute('INSERT OR REPLACE INTO agreements VALUES(?,?,?)',('alice',self.mod.legal_service.VERSION,int(time.time())));self.mod.DB.commit()
+  for key in ('privacy','terms','community','delete'):
+   with urllib.request.urlopen(self.url+'/legal/'+key) as response:
+    content=response.read().decode();self.assertIn('Oldi Chat',content);self.assertIn("frame-ancestors 'none'",response.headers['Content-Security-Policy']);self.assertEqual(response.headers['Cache-Control'],'no-store')
+  self.assertEqual(self.request('/legal/status')[0],401)
+
+ def test_reports_consent_permissions_encryption_and_moderation(self):
+  import hashlib
+  _,room=self.request('/room/create',{'kind':'channel','title':'Report test','members':['bobby']},self.tokens['alice']);rid=room['id']
+  original=self.channel_record(rid);self.request('/channels/history/store',original,self.tokens['alice']);parent=json.loads(original['record'])['id']
+  record=self.channel_record(rid,nick='bobby',thread=parent,text='Reportable public test text');mid=json.loads(record['record'])['id'];self.assertEqual(self.request('/channels/history/store',record,self.tokens['bobby'])[0],200)
+  report={'target':'bobby','room':rid,'mid':mid,'reason':'harassment','excerpt':'Only this selected excerpt','detail':'Please review','share_consent':True}
+  self.assertEqual(self.request('/reports',dict(report,share_consent=False),self.tokens['alice'])[0],400)
+  self.assertEqual(self.request('/reports',dict(report,target='eve_test'),self.tokens['alice'])[0],400)
+  self.assertEqual(self.request('/reports',report,self.tokens['eve_test'])[0],403)
+  code,created=self.request('/reports',report,self.tokens['alice']);self.assertEqual(code,200,created)
+  raw=self.mod.DB.execute('SELECT body FROM abuse_reports WHERE id=?',(created['id'],)).fetchone()[0];self.assertNotIn(b'Only this selected excerpt',raw)
+  self.assertEqual(self.request('/moderation/reports',token=self.tokens['bobby'])[0],403)
+  previous={k:os.environ.get(k) for k in ('OLDY_OWNER_NICK','OLDY_OWNER_KEY_HASH')}
+  try:
+   os.environ['OLDY_OWNER_NICK']='alice';os.environ['OLDY_OWNER_KEY_HASH']=hashlib.sha256(self.keys['sig'].encode()).hexdigest()
+   rows=self.request('/moderation/reports',token=self.tokens['alice'])[1]['reports'];match=next(r for r in rows if r['id']==created['id']);self.assertEqual(match['excerpt'],report['excerpt'])
+   action={'id':created['id'],'action':'restrict_user','note':'Verified repeated harassment'}
+   self.assertEqual(self.request('/moderation/action',action,self.tokens['bobby'])[0],403)
+   self.assertEqual(self.request('/moderation/action',action,self.tokens['alice'])[0],200)
+   self.assertEqual(self.request('/room/create',{'kind':'group','title':'Blocked'},self.tokens['bobby'])[0],403)
+   self.assertEqual(self.request('/moderation/action',dict(action,action='restore_user'),self.tokens['alice'])[0],200)
+   self.assertEqual(self.request('/moderation/action',dict(action,action='remove_message'),self.tokens['alice'])[0],200)
+   self.assertFalse(self.mod.DB.execute('SELECT 1 FROM posts WHERE mid=?',(mid,)).fetchone())
+  finally:
+   for key,value in previous.items():
+    if value is None:os.environ.pop(key,None)
+    else:os.environ[key]=value
+   self.mod.DB.execute("DELETE FROM publishing_restrictions WHERE nick='bobby'");self.mod.DB.commit()
+
+ def test_account_delete_web_otp_scope_and_cleanup(self):
+  name='delete_web';email=name+'@example.test';_,account=self.request('/register',{'nick':name,'email':email,'password':'backup password 123',**self.keys});token=account['token']
+  _,room=self.request('/room/create',{'kind':'group','title':'Delete my group','members':['bobby']},token)
+  unknown=self.request('/account/deletion/request',{'email':'no_account_here@example.test'});known=self.request('/account/deletion/request',{'email':email});self.assertEqual(set(unknown[1]),set(known[1]));ticket=known[1]['ticket'];delete_code=self.mail[email]
+  _,login=self.request('/login/request',{'email':email});login_code=self.mail[email]
+  request={'email':email,'ticket':ticket,'code':login_code,'confirm':'DELETE'}
+  if login_code!=delete_code:self.assertEqual(self.request('/account/deletion/confirm',request)[0],400)
+  self.assertEqual(self.request('/account/deletion/confirm',dict(request,code=delete_code,confirm=''))[0],400)
+  code,deleted=self.request('/account/deletion/confirm',dict(request,code=delete_code));self.assertEqual(code,200,deleted)
+  self.assertEqual(self.request('/me',token=token)[0],401);self.assertEqual(self.request('/account/deletion/confirm',dict(request,code=delete_code))[0],400)
+  self.assertFalse(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',(name,)).fetchone());self.assertFalse(self.mod.DB.execute('SELECT 1 FROM rooms WHERE id=?',(room['id'],)).fetchone());self.assertFalse(self.mod.DB.execute('SELECT 1 FROM emails WHERE email=?',(email,)).fetchone());self.assertTrue(self.mod.DB.execute("SELECT 1 FROM users WHERE nick='bobby'").fetchone())
+  self.assertTrue(self.request('/handles?handle='+name)[1]['available']);self.assertTrue((self.mod.ROOT/'account-deletions.jsonl').exists())
+
+ def test_account_delete_requires_own_confirmation_and_replays_after_restore(self):
+  name='delete_local';_,account=self.request('/register',{'nick':name,'password':'backup password 123',**self.keys});token=account['token']
+  self.assertEqual(self.request('/account/delete',{'confirm':name})[0],401)
+  self.assertEqual(self.request('/account/delete',{'confirm':'alice'},token)[0],400)
+  snapshot=self.mod.DB.execute('SELECT * FROM users WHERE nick=?',(name,)).fetchone()
+  self.assertEqual(self.request('/account/delete',{'confirm':name},token)[0],200)
+  with self.mod.LOCK:
+   self.mod.DB.execute('INSERT INTO users VALUES(?,?,?,?,?,?)',snapshot);self.mod.DB.commit();self.mod.DB.close();self.mod.init_db()
+  self.assertFalse(self.mod.DB.execute('SELECT 1 FROM users WHERE nick=?',(name,)).fetchone());self.assertTrue(self.mod.DB.execute("SELECT 1 FROM users WHERE nick='alice'").fetchone())
 
 if __name__=='__main__':unittest.main()

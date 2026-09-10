@@ -12,6 +12,7 @@ final class Api {
  static final String LEGACY_URL=DEFAULT_URL+":8443";
  static final String DEFAULT_PIN="A84186AD26B22E7D69F23D1838A9DB5A2B277A6D567D6E49249C7714153E5D4A";
  static volatile String live="";
+ volatile HttpsURLConnection polling;void interruptPoll(){HttpsURLConnection c=polling;if(c!=null)c.disconnect();}
  final SharedPreferences prefs;
  Api(Context c){prefs=c.getSharedPreferences("connection",0);}
  String url(){String u=prefs.getString("url",DEFAULT_URL);return u.equals(LEGACY_URL)?DEFAULT_URL:u;}
@@ -37,12 +38,17 @@ final class Api {
  JSONObject request(String base,String path,JSONObject body,String token)throws Exception{
   HttpsURLConnection c=(HttpsURLConnection)new URL(base+path).openConnection();c.setSSLSocketFactory(factory());c.setConnectTimeout(18000);c.setReadTimeout(40000);c.setInstanceFollowRedirects(false);c.setRequestProperty("Accept","application/json");c.setRequestProperty("Connection","close");
   if(!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
+  if(path.equals("/poll"))polling=c;
   try{
    if(body!=null){c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json");byte[] raw=Crypto.bytes(body.toString());c.setFixedLengthStreamingMode(raw.length);try(OutputStream o=c.getOutputStream()){o.write(raw);}}
    int status=c.getResponseCode();String response=read(status>=400?c.getErrorStream():c.getInputStream(),2000000);JSONObject j;
    try{j=new JSONObject(response);}catch(Exception e){throw new Exception(I18n.t("Не удалось получить ответ. Повторите позже."));}
    if(status!=200)throw new Failure(status,j.optString("error",I18n.t("Не удалось выполнить действие")));return j;
-  }finally{c.disconnect();}
+  }finally{if(polling==c)polling=null;c.disconnect();}
+ }
+ JSONObject quickHealth()throws Exception{
+  String base=url().equals(DEFAULT_URL)&&!live.isEmpty()?live:url();HttpsURLConnection c=(HttpsURLConnection)new URL(base+"/health").openConnection();c.setSSLSocketFactory(factory());c.setConnectTimeout(2200);c.setReadTimeout(2200);c.setInstanceFollowRedirects(false);
+  try{if(c.getResponseCode()!=200)throw new IOException("Health check failed");JSONObject h=new JSONObject(read(c.getInputStream(),4096));if(!h.optString("service").equals("oldy-chat"))throw new IOException("Wrong service");return h;}finally{c.disconnect();}
  }
  JSONObject check()throws Exception{
   if(!url().equals(DEFAULT_URL))return request(url(),"/health",null,"");

@@ -53,10 +53,10 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
    if member.file_size>90000000:raise SystemExit('Неверный размер архива.')
    bundle=zipped.read(member)
  if hashlib.sha256(bundle).hexdigest()!=release['bundle_sha256']:raise SystemExit('Проверка архива не пройдена. Сервер не изменён.')
- expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','release.json'}
+ expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py','release.json'}
  with tarfile.open(fileobj=io.BytesIO(bundle),mode='r:gz') as tar:
   members=tar.getmembers()
-  if len(members)!=len(expected) or {m.name for m in members}!=expected or not all(m.isfile() and m.size<90000000 for m in members):raise SystemExit('Неверный состав выпуска.')
+  if len(members)!=len(expected) or {m.name for m in members}!=expected or not all(m.isfile() and m.size<180000000 for m in members):raise SystemExit('Неверный состав выпуска.')
   for member in members:
    with tar.extractfile(member) as source,(folder/member.name).open('wb') as target:
     while True:

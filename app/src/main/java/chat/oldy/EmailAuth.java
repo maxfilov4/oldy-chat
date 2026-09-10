@@ -19,9 +19,11 @@ final class EmailAuth {
   EditText email=a.field(b,I18n.t("Электронная почта"),false);email.setInputType(33);email.setAutofillHints(View.AUTOFILL_HINT_EMAIL_ADDRESS);
   EditText backup=signup?a.field(b,I18n.t("Пароль резервной копии · от 10 символов"),true):null;
   if(signup){a.paragraph(b,I18n.t("Этот пароль нужен только для восстановления защищённой переписки на другом телефоне. Вход — по коду из письма."));a.space(b,12);}
+  CheckBox agreement=signup?LegalCenter.signup(a,b):null;
   TextView submit=a.button(I18n.t("Получить код на почту"),true,()->{});b.addView(submit);
   if(signup)SignupHandle.bind(a,nick,available,submit);
   submit.setOnClickListener(v->{
+   if(signup&&!agreement.isChecked()){a.error(LegalCenter.tr("Прими условия и правила сообщества","Accept the terms and community rules"));return;}
    String mail=email.getText().toString().trim();if(!android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches()){email.setError(I18n.t("Проверь адрес почты"));return;}
    String handle=signup?nick.getText().toString().trim().replaceFirst("^@","").toLowerCase(java.util.Locale.ROOT):"",pass=signup?backup.getText().toString():"",display=signup?name.getText().toString().trim():"";
    if(signup&&(!handle.matches("[a-z0-9_]{3,24}")||pass.length()<10||pass.length()>128||display.isEmpty())){a.error(I18n.t("Укажи имя, свободный @ник и пароль резервной копии от 10 до 128 символов."));return;}
