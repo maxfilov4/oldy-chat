@@ -87,5 +87,5 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
  if not pathlib.Path('/etc/oldy-chat/mail.env').exists():print('Для писем с кодом выполни: python3 /opt/oldy-chat/configure-mail.py',flush=True)
 '''.replace('META',repr({k:meta[k] for k in ('url','zip_sha256','bundle_sha256')})).replace('PUBLISH_ONLY',repr(args.publish_only)).replace('PUBLISHER',Path(__file__).with_name('update-publisher.py').read_text())
 ast.parse(script)
-args.output.write_text("python3 - <<'OLDY_UPDATE_060'\n"+script+"OLDY_UPDATE_060\n")
+args.output.write_text("python3 - <<'OLDY_UPDATE_061'\n"+script+"OLDY_UPDATE_061\n")
 print(json.dumps({'file':str(args.output),'bytes':args.output.stat().st_size,'sha256':hashlib.sha256(args.output.read_bytes()).hexdigest()}))

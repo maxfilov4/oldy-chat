@@ -37,7 +37,7 @@ class RelayTest(unittest.TestCase):
   path=self.mod.ROOT/'youtube-rules.json'
   try:
    path.write_text(json.dumps(dict(config,version=2,domains=['attacker.example'],proxy='https://attacker.example')))
-   self.assertEqual(self.request('/youtube/config',token=self.tokens['alice'])[1]['version'],1)
+   self.assertEqual(self.request('/youtube/config',token=self.tokens['alice'])[1],config)
    path.write_text(json.dumps(dict(config,version=2,enabled=False,domains=['youtube.com'])))
    self.assertFalse(self.request('/youtube/config',token=self.tokens['alice'])[1]['enabled'])
   finally:path.unlink(missing_ok=True)
