@@ -24,7 +24,7 @@ archive_name='OldyChat-0.6.1-server.tar.gz'
 cache=pathlib.Path('/root')/archive_name
 with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
  folder=pathlib.Path(tmp);bundle=None
- if cache.is_file() and cache.stat().st_size<90000000:
+ if cache.is_file() and cache.stat().st_size<180000000:
   data=cache.read_bytes()
   if hashlib.sha256(data).hexdigest()==release['bundle_sha256']:bundle=data
  if bundle is None:
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
       chunk=source.read(1048576)
       if not chunk:break
       length+=len(chunk)
-      if length>120000000:raise ValueError('Неожиданный размер загрузки')
+      if length>500000000:raise ValueError('Неожиданный размер загрузки')
       digest.update(chunk);target.write(chunk)
     break
    except urllib.error.HTTPError as error:
@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
   if digest.hexdigest()!=release['zip_sha256']:raise SystemExit('Проверка загрузки не пройдена. Сервер не изменён.')
   with zipfile.ZipFile(downloaded) as zipped:
    member=zipped.getinfo(archive_name)
-   if member.file_size>90000000:raise SystemExit('Неверный размер архива.')
+   if member.file_size>180000000:raise SystemExit('Неверный размер архива.')
    bundle=zipped.read(member)
  if hashlib.sha256(bundle).hexdigest()!=release['bundle_sha256']:raise SystemExit('Проверка архива не пройдена. Сервер не изменён.')
  expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py','release.json'}

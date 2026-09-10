@@ -33,7 +33,7 @@ jobs:
       - name: Prepare isolated call relay and video tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y coturn ffmpeg espeak-ng
+          sudo apt-get install -y coturn ffmpeg
           sudo systemctl stop coturn
       - name: Server tests
         run: |
@@ -55,7 +55,7 @@ jobs:
       - name: Launch on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 36
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-front emulated -camera-back emulated
