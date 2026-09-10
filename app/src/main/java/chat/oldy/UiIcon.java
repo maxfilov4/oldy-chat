@@ -6,14 +6,18 @@ import android.view.View;
 
 /** Small vector controls remain legible with every system font and emoji set. */
 final class UiIcon extends View {
- final Paint paint=new Paint(3);String symbol;int color;
+ final Paint paint=new Paint(3);String symbol;int color;float scale=.50f;
  UiIcon(Context c,String symbol,int color){super(c);this.symbol=symbol;this.color=color;setFocusable(true);}
  void symbol(String value){symbol=value;invalidate();}
- protected void onDraw(Canvas c){super.onDraw(c);float size=Math.min(getWidth(),getHeight())*.50f;
+ protected void onDraw(Canvas c){super.onDraw(c);float size=Math.min(getWidth(),getHeight())*scale;
   c.save();c.translate((getWidth()-size)/2,(getHeight()-size)/2);c.scale(size/24,size/24);
   paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(2.2f);paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(color);
   Path p=new Path();
   switch(symbol){
+   case "profile":c.drawCircle(12,7,4,paint);p.moveTo(3,22);p.cubicTo(3,12,21,12,21,22);c.drawPath(p,paint);break;
+   case "contacts":c.drawCircle(8,7,3,paint);c.drawCircle(17,8,2.5f,paint);p.moveTo(1,21);p.cubicTo(1,12,15,12,15,21);p.moveTo(17,14);p.cubicTo(21,14,23,17,23,21);c.drawPath(p,paint);break;
+   case "settings":c.drawCircle(12,12,6,paint);c.drawCircle(12,12,2,paint);for(int i=0;i<8;i++){double angle=i*Math.PI/4;c.drawLine(12+6*(float)Math.cos(angle),12+6*(float)Math.sin(angle),12+9*(float)Math.cos(angle),12+9*(float)Math.sin(angle),paint);}break;
+   case "shield":p.moveTo(12,2);p.lineTo(21,6);p.lineTo(20,14);p.quadTo(18,20,12,23);p.quadTo(6,20,4,14);p.lineTo(3,6);p.close();c.drawPath(p,paint);p.reset();p.moveTo(8,12);p.lineTo(11,15);p.lineTo(16,9);c.drawPath(p,paint);break;
    case "back":c.drawLine(20,12,4,12,paint);p.moveTo(11,5);p.lineTo(4,12);p.lineTo(11,19);c.drawPath(p,paint);break;
    case "close":c.drawLine(6,6,18,18,paint);c.drawLine(18,6,6,18,paint);break;
    case "mic":c.drawRoundRect(8,2,16,15,4,4,paint);c.drawArc(4,5,20,20,0,180,false,paint);c.drawLine(12,20,12,23,paint);break;

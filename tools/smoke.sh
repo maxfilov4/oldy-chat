@@ -47,6 +47,12 @@ adb shell settings put secure show_ime_with_hard_keyboard 0
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.PrivacyInstrumentation > build/privacy-results.txt
 cat build/privacy-results.txt
 grep -q OLDY_PRIVACY_PASS build/privacy-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.YouTubeInstrumentation > build/youtube-results.txt
+cat build/youtube-results.txt
+grep -q OLDY_YOUTUBE_PASS build/youtube-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.LocalTunnelInstrumentation > build/local-tunnel-results.txt
+cat build/local-tunnel-results.txt
+grep -q OLDY_LOCAL_TUNNEL_PASS build/local-tunnel-results.txt
 adb shell pm grant chat.oldy android.permission.POST_NOTIFICATIONS
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.FeatureInstrumentation > build/feature-results.txt
 cat build/feature-results.txt
@@ -113,12 +119,6 @@ grep -q 'OLDY_CALL_PASS' build/call-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ExperienceInstrumentation > build/experience-results.txt
 cat build/experience-results.txt
 grep -q OLDY_EXPERIENCE_PASS build/experience-results.txt
-timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.YouTubeInstrumentation > build/youtube-results.txt
-cat build/youtube-results.txt
-grep -q OLDY_YOUTUBE_PASS build/youtube-results.txt
-timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.LocalTunnelInstrumentation > build/local-tunnel-results.txt
-cat build/local-tunnel-results.txt
-grep -q OLDY_LOCAL_TUNNEL_PASS build/local-tunnel-results.txt
 adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi

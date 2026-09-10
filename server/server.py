@@ -478,6 +478,7 @@ def save_sticker_offer(nick,data):
  with LOCK:
   current=DB.execute('SELECT owner FROM sticker_offers WHERE id=?',(sid,)).fetchone()
   if current and current[0]!=nick:raise Problem(403,'Предложение принадлежит другому автору')
+  if not current and DB.execute('SELECT COUNT(*) FROM sticker_offers WHERE owner=?',(nick,)).fetchone()[0]>=300:raise Problem(400,'Достигнут лимит предложений')
   DB.execute('INSERT INTO sticker_offers VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,price_minor=excluded.price_minor,asset=excluded.asset',(sid,nick,title.strip(),amount,'RUB',encrypted,int(time.time()*1000)));DB.commit()
  fee=amount*1500//10000
  return {'id':sid,'status':'draft_payment_not_configured','price_minor':amount,'currency':'RUB','fee_basis_points':1500,'oldi_fee_minor':fee,'seller_before_external_fees_minor':amount-fee,'checkout_enabled':False}
