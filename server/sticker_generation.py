@@ -92,7 +92,11 @@ def render_sheet(photo,action):
   'Use expressive but anatomically coherent poses, consistent identity and clean sticker linework.'
  )
  boundary='OldiSticker'+secrets.token_hex(16);parts=[]
- for name,value in {'model':model,'prompt':prompt,'n':'1','size':'1536x1024','quality':'low','background':'transparent','output_format':'png','input_fidelity':'high'}.items():
+ fields={'model':model,'prompt':prompt,'n':'1','size':'1536x1024','quality':'low','background':'transparent','output_format':'png'}
+ # Keep optional fidelity controls limited to the older full-size models.
+ # Mini uses its default input handling; never retry with another model.
+ if model in ('gpt-image-1','gpt-image-1.5'):fields['input_fidelity']='high'
+ for name,value in fields.items():
   parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+name+'"\r\n\r\n'+value+'\r\n').encode())
  parts.extend([('--'+boundary+'\r\nContent-Disposition: form-data; name="image[]"; filename="reference.jpg"\r\nContent-Type: image/jpeg\r\n\r\n').encode(),photo,b'\r\n',('--'+boundary+'--\r\n').encode()])
  request=urllib.request.Request('https://api.openai.com/v1/images/edits',data=b''.join(parts),headers={'Authorization':'Bearer '+key,'Content-Type':'multipart/form-data; boundary='+boundary,'Accept':'application/json'},method='POST')

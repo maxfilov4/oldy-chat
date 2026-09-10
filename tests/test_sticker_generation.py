@@ -62,6 +62,23 @@ class StickerGenerationTest(unittest.TestCase):
   with Image.open(io.BytesIO(raw)) as image:self.assertEqual(image.format,'JPEG');self.assertFalse(image.getexif())
   for invalid in ['https://example.com/photo','*'*1500000,'AAAA']:
    with self.assertRaises(sg.GenerationError):sg.sanitized_image(invalid)
+ def test_edit_request_uses_model_specific_parameters_without_retries(self):
+  from email.parser import BytesParser
+  from email.policy import default
+  response=json.dumps({'data':[{'b64_json':base64.b64encode(b'fixture-output').decode()}]}).encode()
+  for model in ('gpt-image-1-mini','gpt-image-1'):
+   with patch.dict(os.environ,{'OLDY_STICKER_MODEL':model}),patch.object(sg.urllib.request,'build_opener') as opener:
+    opener.return_value.open.return_value=io.BytesIO(response)
+    self.assertEqual(sg.render_sheet(b'fixture-photo','wave'),b'fixture-output')
+    opener.return_value.open.assert_called_once()
+    request=opener.return_value.open.call_args.args[0]
+    message=BytesParser(policy=default).parsebytes(('Content-Type: '+request.get_header('Content-type')+'\r\n\r\n').encode()+request.data)
+    fields={part.get_param('name',header='content-disposition'):part.get_payload(decode=True) for part in message.iter_parts()}
+    self.assertEqual(request.full_url,'https://api.openai.com/v1/images/edits')
+    self.assertEqual(fields['model'],model.encode());self.assertEqual(fields['image[]'],b'fixture-photo')
+    self.assertEqual(fields['output_format'],b'png');self.assertEqual(fields['quality'],b'low')
+    if model=='gpt-image-1-mini':self.assertNotIn('input_fidelity',fields)
+    else:self.assertEqual(fields['input_fidelity'],b'high')
 
 class StickerReleaseTest(unittest.TestCase):
  def test_upgrade_keeps_key_model_limits_and_enables_new_users(self):
