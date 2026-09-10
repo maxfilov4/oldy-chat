@@ -64,3 +64,28 @@ class StickerGenerationTest(unittest.TestCase):
   with Image.open(io.BytesIO(raw)) as image:self.assertEqual(image.format,'JPEG');self.assertFalse(image.getexif())
   for invalid in ['https://example.com/photo','*'*1500000,'AAAA']:
    with self.assertRaises(sg.GenerationError):sg.sanitized_image(invalid)
+
+class StickerReleaseTest(unittest.TestCase):
+ def test_upgrade_keeps_key_model_limits_and_enables_new_users(self):
+  import importlib.util,tempfile,stat
+  spec=importlib.util.spec_from_file_location('configure_stickers',Path(__file__).resolve().parents[1]/'server'/'configure-stickers.py');setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
+  with tempfile.TemporaryDirectory() as folder:
+   path=Path(folder)/'stickers.env'
+   values={'OLDY_STICKER_OPENAI_KEY':'fixture-not-a-real-key','OLDY_STICKER_USERS':'oldy','OLDY_STICKER_MODEL':'gpt-image-1','OLDY_STICKER_DAILY_LIMIT':'17'}
+   setup.save_settings(path,values);self.assertTrue(setup.enable_all(path));after=setup.read_settings(path)
+   self.assertEqual(after,dict(values,OLDY_STICKER_USERS='*'));self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
+   with patch.dict(os.environ,after):
+    for nick in ('oldy','alice','new_future_user'):self.assertTrue(sg.enabled(nick))
+   self.assertFalse(setup.enable_all(Path(folder)/'missing.env'));self.assertFalse((Path(folder)/'missing.env').exists())
+ def test_http_errors_hide_body_and_distinguish_billing_key_and_capacity(self):
+  import urllib.error
+  for status,code,expected in [(429,'insufficient_quota','PROVIDER_BILLING'),(400,'billing_hard_limit_reached','PROVIDER_BILLING'),(401,'invalid_api_key','PROVIDER_CREDENTIALS'),(429,'rate_limit_exceeded','PROVIDER_LIMIT'),(404,'model_not_found','PROVIDER_MODEL'),(400,'content_policy_violation','PROVIDER_REJECTED'),(500,'unknown','PROVIDER_UNAVAILABLE')]:
+   body=json.dumps({'error':{'code':code,'message':'PRIVATE fixture photo-url or credential'}}).encode()
+   error=urllib.error.HTTPError('https://api.openai.com/v1/images/edits',status,'error',{},io.BytesIO(body))
+   self.assertEqual(sg.provider_error(error),expected)
+ def test_old_job_schema_migrates_without_losing_owned_results(self):
+  db=sqlite3.connect(':memory:');s=SimpleNamespace(DB=db,LOCK=threading.RLock())
+  db.execute("CREATE TABLE sticker_jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created INTEGER NOT NULL,expires INTEGER NOT NULL,output BLOB)")
+  now=int(time.time());db.execute("INSERT INTO sticker_jobs VALUES('existing','alice','digest','failed','PROVIDER_ACCESS',?,?,NULL)",(now,now+3600));db.commit()
+  sg.init(s);sg.init(s)
+  result=sg.public(s,'alice','existing');self.assertEqual(result['error'],'PROVIDER_ACCESS');self.assertEqual(result['stage'],'queued');self.assertGreaterEqual(result['elapsed_seconds'],0);db.close()

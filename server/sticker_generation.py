@@ -33,6 +33,8 @@ def enabled(nick):
 
 def init(s):
  s.DB.execute('''CREATE TABLE IF NOT EXISTS sticker_jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created INTEGER NOT NULL,expires INTEGER NOT NULL,output BLOB)''')
+ if 'stage' not in {row[1] for row in s.DB.execute('PRAGMA table_info(sticker_jobs)')}:
+  s.DB.execute("ALTER TABLE sticker_jobs ADD COLUMN stage TEXT NOT NULL DEFAULT 'queued'")
  s.DB.execute("UPDATE sticker_jobs SET state='failed',error='SERVER_RESTARTED' WHERE state='generating'")
  cleanup(s)
 
@@ -61,6 +63,18 @@ def sanitized_image(encoded):
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs):return None
+
+def provider_error(error):
+ # Return only our fixed public codes, never the provider body (which can echo input).
+ try:
+  payload=json.loads(error.read(16384)).get('error',{})
+  code=str(payload.get('code',''));kind=str(payload.get('type',''))
+ except Exception:code=kind=''
+ if code in ('insufficient_quota','billing_hard_limit_reached','billing_not_active') or kind=='insufficient_quota':return 'PROVIDER_BILLING'
+ if code in ('model_not_found','model_not_available'):return 'PROVIDER_MODEL'
+ if code in ('organization_verification_required','verification_required'):return 'PROVIDER_VERIFICATION'
+ if code in ('content_policy_violation','moderation_blocked'):return 'PROVIDER_REJECTED'
+ return {400:'PROVIDER_REJECTED',401:'PROVIDER_CREDENTIALS',403:'PROVIDER_ACCESS',429:'PROVIDER_LIMIT'}.get(error.code,'PROVIDER_UNAVAILABLE')
 
 def render_sheet(photo,action):
  key,model,_,_=configuration()
@@ -91,7 +105,7 @@ def render_sheet(photo,action):
    if len(result)>16000000:raise GenerationError('PROVIDER_RESPONSE_SIZE')
    return result
  except urllib.error.HTTPError as e:
-  raise GenerationError({400:'PROVIDER_REJECTED',401:'PROVIDER_CREDENTIALS',403:'PROVIDER_ACCESS',429:'PROVIDER_LIMIT'}.get(e.code,'PROVIDER_UNAVAILABLE')) from None
+  raise GenerationError(provider_error(e)) from None
  except GenerationError:raise
  except Exception:raise GenerationError('PROVIDER_UNAVAILABLE') from None
 
@@ -121,10 +135,10 @@ def animation(sheet):
  except Exception:raise GenerationError('ANIMATION_LAYOUT') from None
 
 def public(s,nick,jid):
- with s.LOCK:row=s.DB.execute('SELECT owner,state,error,expires,output FROM sticker_jobs WHERE id=?',(jid,)).fetchone()
+ with s.LOCK:row=s.DB.execute('SELECT owner,state,error,expires,output,stage,created FROM sticker_jobs WHERE id=?',(jid,)).fetchone()
  if not row or row[0]!=nick:raise s.Problem(404,'STICKER_JOB_NOT_FOUND')
  state=row[1] if row[3]>=int(time.time()) else 'expired'
- result={'id':jid,'state':state,'error':row[2]}
+ result={'id':jid,'state':state,'error':row[2],'stage':row[5],'elapsed_seconds':max(0,int(time.time())-row[6])}
  if state=='ready' and row[4]:
   encrypted=row[4];raw=AESGCM(s.CHANNEL_KEY).decrypt(encrypted[:12],encrypted[12:],('oldi-generated-sticker:'+nick+':'+jid).encode())
   result.update(image=base64.b64encode(raw).decode(),sha256=hashlib.sha256(raw).hexdigest())
@@ -132,7 +146,10 @@ def public(s,nick,jid):
 
 def run(s,nick,jid,photo,action):
  try:
-  raw=animation(render_sheet(photo,action));nonce=secrets.token_bytes(12)
+  with s.LOCK:s.DB.execute("UPDATE sticker_jobs SET stage='drawing' WHERE id=? AND owner=?",(jid,nick));s.DB.commit()
+  sheet=render_sheet(photo,action)
+  with s.LOCK:s.DB.execute("UPDATE sticker_jobs SET stage='encoding' WHERE id=? AND owner=?",(jid,nick));s.DB.commit()
+  raw=animation(sheet);nonce=secrets.token_bytes(12)
   encrypted=nonce+AESGCM(s.CHANNEL_KEY).encrypt(nonce,raw,('oldi-generated-sticker:'+nick+':'+jid).encode())
   with s.LOCK:s.DB.execute("UPDATE sticker_jobs SET state='ready',output=? WHERE id=? AND owner=? AND state='generating'",(encrypted,jid,nick));s.DB.commit()
  except Exception as error:

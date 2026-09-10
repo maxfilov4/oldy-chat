@@ -6,8 +6,8 @@ release=build/'release';release.mkdir(exist_ok=True)
 for name in ('server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py','sticker_generation.py','configure-stickers.py'):shutil.copyfile(root/'server'/name,release/name)
 shutil.copyfile(apk,release/'OldyChat-latest.apk')
 android='{http://schemas.android.com/apk/res/android}';app=ET.parse(root/'app/src/main/AndroidManifest.xml').getroot()
-manifest={'package':app.get('package','chat.oldy'),'version_code':int(app.get(android+'versionCode')),'version_name':app.get(android+'versionName'),'size':apk.stat().st_size,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'notes':'Oldi 0.6.2: четыре главных раздела снизу, YouTube и категории сверху, настройки по кнопке ⋮. YouTube внутри приложения, явный локальный маршрут WebView и пять режимов ByeDPI. 21 тема, исправленные неоновые акценты. Создание стикера первым пунктом в +, крупный результат, генерация новых мультяшных кадров через подключаемый OpenAI API (требуется настройка владельцем сервера). Работа DPI зависит от сети оператора. Аккаунт и переписка сохраняются.'}
+manifest={'package':app.get('package','chat.oldy'),'version_code':int(app.get(android+'versionCode')),'version_name':app.get(android+'versionName'),'size':apk.stat().st_size,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'notes':'Oldi 0.6.3: обновление только стикеров. Мультяшные кадры с действиями из фото через OpenAI; видимые этапы создания, возврат к готовому результату без повторной генерации, сохранение кнопкой и новые стикеры сверху. Доступ всем аккаунтам; введённый API-ключ, модель и общий лимит сохраняются. Понятные ошибки ключа, оплаты и очереди.'}
 (release/'release.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
-with tarfile.open(build/'OldyChat-0.6.2-server.tar.gz','w:gz') as t:
+with tarfile.open(build/'OldyChat-0.6.3-server.tar.gz','w:gz') as t:
  for f in sorted(release.iterdir()):t.add(f,arcname=f.name)
-print(json.dumps({'archive':str(build/'OldyChat-0.6.2-server.tar.gz'),'apk_sha256':manifest['sha256']}))
+print(json.dumps({'archive':str(build/'OldyChat-0.6.3-server.tar.gz'),'apk_sha256':manifest['sha256']}))

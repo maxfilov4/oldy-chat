@@ -40,6 +40,7 @@ install -o root -g root -m 644 "$oldy_src/server.py" /opt/oldy-chat/server.py
 for oldy_legal_file in legal_service.py legal_texts.json configure-legal.py retention.py sticker_generation.py configure-stickers.py; do
  install -o root -g root -m 644 "$oldy_src/$oldy_legal_file" "/opt/oldy-chat/$oldy_legal_file"
 done
+python3 /opt/oldy-chat/configure-stickers.py --enable-all --no-restart
 cat > /etc/systemd/system/oldy-retention.service <<'RETENTION'
 [Unit]
 Description=Expire managed Oldi backup snapshots after 30 days
