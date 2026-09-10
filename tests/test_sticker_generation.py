@@ -14,7 +14,7 @@ class StickerGenerationTest(unittest.TestCase):
  def setUp(self):
   self.db=sqlite3.connect(':memory:',check_same_thread=False)
   self.s=SimpleNamespace(DB=self.db,LOCK=threading.RLock(),CHANNEL_KEY=os.urandom(32),Problem=Error,rate=lambda *a:None)
-  self.env=patch.dict(os.environ,{'OLDY_STICKER_OPENAI_KEY':'test-fixture-only','OLDY_STICKER_USERS':'alice','OLDY_STICKER_DAILY_LIMIT':'10'});self.env.start();sg.init(self.s)
+  self.env=patch.dict(os.environ,{'OLDY_STICKER_OPENAI_KEY':'test-fixture-only','OLDY_STICKER_USERS':'alice','OLDY_STICKER_MODEL':'gpt-image-1-mini'});self.env.start();sg.init(self.s)
   photo=io.BytesIO();Image.new('RGB',(512,512),'#abcdef').save(photo,format='JPEG');self.photo=base64.b64encode(photo.getvalue()).decode()
  def tearDown(self):self.env.stop();self.db.close()
  def request(self,**changes):return dict(id=str(uuid.uuid4()),image=self.photo,action='wave',consent_version=1,**changes)
@@ -44,12 +44,10 @@ class StickerGenerationTest(unittest.TestCase):
    for payload in [dict(self.request(),consent_version=False),dict(self.request(),url='https://attacker.example'),dict(self.request(),action='shell')]:
     with self.assertRaises(Error):sg.api(self.s,'/stickers/generate',True,payload,'alice')
    provider.assert_not_called()
- def test_quota_is_persistent_and_provider_error_has_no_secrets(self):
+ def test_generation_has_no_daily_quota_and_provider_error_has_no_secrets(self):
   with patch.object(sg,'render_sheet',side_effect=sg.GenerationError('PROVIDER_ACCESS')):
-   for _ in range(3):
+   for _ in range(35):
     req=self.request();sg.api(self.s,'/stickers/generate',True,req,'alice');result=self.done(req['id']);self.assertEqual(result['error'],'PROVIDER_ACCESS');self.assertNotIn('image',result)
-   with self.assertRaises(Error) as e:sg.api(self.s,'/stickers/generate',True,self.request(),'alice')
-   self.assertEqual(e.exception.code,'STICKER_DAILY_LIMIT')
  def test_static_or_opaque_sheet_is_rejected(self):
   for color in ((10,30,20,255),(0,0,0,0)):
    buffer=io.BytesIO();Image.new('RGBA',(1536,1024),color).save(buffer,format='PNG')
@@ -73,7 +71,7 @@ class StickerReleaseTest(unittest.TestCase):
    path=Path(folder)/'stickers.env'
    values={'OLDY_STICKER_OPENAI_KEY':'fixture-not-a-real-key','OLDY_STICKER_USERS':'oldy','OLDY_STICKER_MODEL':'gpt-image-1','OLDY_STICKER_DAILY_LIMIT':'17'}
    setup.save_settings(path,values);self.assertTrue(setup.enable_all(path));after=setup.read_settings(path)
-   self.assertEqual(after,dict(values,OLDY_STICKER_USERS='*'));self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
+   self.assertEqual(after,{'OLDY_STICKER_OPENAI_KEY':'fixture-not-a-real-key','OLDY_STICKER_USERS':'*','OLDY_STICKER_MODEL':'gpt-image-1-mini'});self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
    with patch.dict(os.environ,after):
     for nick in ('oldy','alice','new_future_user'):self.assertTrue(sg.enabled(nick))
    self.assertFalse(setup.enable_all(Path(folder)/'missing.env'));self.assertFalse((Path(folder)/'missing.env').exists())

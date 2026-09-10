@@ -12,7 +12,7 @@ ACTIONS={
  'laugh':'smiles, opens the mouth in a warm laugh with changing cheeks and eyelids, then relaxes',
  'yes':'raises a hand into a thumbs-up, nods with changing face expression, then returns to the starting pose',
 }
-MODELS={'gpt-image-1','gpt-image-1.5','gpt-image-2.5-sunburst'}
+MODELS={'gpt-image-1','gpt-image-1.5','gpt-image-1-mini','gpt-image-2.5-sunburst'}
 WORK=ThreadPoolExecutor(max_workers=1,thread_name_prefix='sticker-generation')
 GATE=threading.BoundedSemaphore(2)
 
@@ -21,14 +21,12 @@ class GenerationError(Exception):
 
 def configuration():
  key=os.environ.get('OLDY_STICKER_OPENAI_KEY','')
- model=os.environ.get('OLDY_STICKER_MODEL','gpt-image-1')
+ model=os.environ.get('OLDY_STICKER_MODEL','gpt-image-1-mini')
  allowed={x.strip() for x in os.environ.get('OLDY_STICKER_USERS','').split(',') if x.strip()}
- try:daily=max(1,min(100,int(os.environ.get('OLDY_STICKER_DAILY_LIMIT','10'))))
- except ValueError:daily=10
- return key,model,allowed,daily
+ return key,model,allowed
 
 def enabled(nick):
- key,model,allowed,_=configuration()
+ key,model,allowed=configuration()
  return bool(key) and model in MODELS and ('*' in allowed or nick in allowed)
 
 def init(s):
@@ -79,7 +77,7 @@ def provider_error(error):
  return {400:'PROVIDER_REJECTED',401:'PROVIDER_CREDENTIALS',403:'PROVIDER_ACCESS',429:'PROVIDER_LIMIT'}.get(error.code,'PROVIDER_UNAVAILABLE')
 
 def render_sheet(photo,action):
- key,model,_,_=configuration()
+ key,model,_=configuration()
  prompt=(
   'Create an original 2D cartoon character animation SPRITE SHEET from the reference photo. '
   'Redraw the person fully as a charming hand-drawn cartoon while preserving recognizable facial features, '
@@ -94,7 +92,7 @@ def render_sheet(photo,action):
   'Use expressive but anatomically coherent poses, consistent identity and clean sticker linework.'
  )
  boundary='OldiSticker'+secrets.token_hex(16);parts=[]
- for name,value in {'model':model,'prompt':prompt,'n':'1','size':'1536x1024','quality':'high','background':'transparent','output_format':'png','input_fidelity':'high'}.items():
+ for name,value in {'model':model,'prompt':prompt,'n':'1','size':'1536x1024','quality':'low','background':'transparent','output_format':'png','input_fidelity':'high'}.items():
   parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+name+'"\r\n\r\n'+value+'\r\n').encode())
  parts.extend([('--'+boundary+'\r\nContent-Disposition: form-data; name="image[]"; filename="reference.jpg"\r\nContent-Type: image/jpeg\r\n\r\n').encode(),photo,b'\r\n',('--'+boundary+'--\r\n').encode()])
  request=urllib.request.Request('https://api.openai.com/v1/images/edits',data=b''.join(parts),headers={'Authorization':'Bearer '+key,'Content-Type':'multipart/form-data; boundary='+boundary,'Accept':'application/json'},method='POST')
@@ -177,14 +175,12 @@ def api(s,path,post,data,nick):
   s.rate(('sticker-create',nick),6,60)
   try:photo=sanitized_image(data.get('image'))
   except GenerationError as e:raise s.Problem(400,e.code)
-  digest=hashlib.sha256(action.encode()+photo).hexdigest();now=int(time.time());_,_,_,daily=configuration()
+  digest=hashlib.sha256(action.encode()+photo).hexdigest();now=int(time.time())
   with s.LOCK:
    previous=s.DB.execute('SELECT owner,digest FROM sticker_jobs WHERE id=?',(jid,)).fetchone()
    if previous:
     if previous!=(nick,digest):raise s.Problem(409,'STICKER_JOB_CONFLICT')
     return public(s,nick,jid)
-   today=now//86400*86400
-   if s.DB.execute('SELECT COUNT(*) FROM sticker_jobs WHERE created>=?',(today,)).fetchone()[0]>=daily or s.DB.execute('SELECT COUNT(*) FROM sticker_jobs WHERE owner=? AND created>=?',(nick,today)).fetchone()[0]>=3:raise s.Problem(429,'STICKER_DAILY_LIMIT')
    if not GATE.acquire(blocking=False):raise s.Problem(429,'STICKER_QUEUE_FULL')
    try:
     s.DB.execute("INSERT INTO sticker_jobs(id,owner,digest,state,created,expires) VALUES(?,?,?,'generating',?,?)",(jid,nick,digest,now,now+3600));s.DB.commit()

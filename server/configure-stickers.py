@@ -23,10 +23,10 @@ def save_settings(path,values):
   if os.path.exists(tmp):os.unlink(tmp)
 
 def enable_all(path):
- # Keep the existing key, model and spending limit byte-for-byte.
+ # Keep the existing key. Apply the fast sticker model and remove old quotas.
  values=read_settings(path)
  if not values.get('OLDY_STICKER_OPENAI_KEY'):return False
- values['OLDY_STICKER_USERS']='*';save_settings(path,values);return True
+ values['OLDY_STICKER_USERS']='*';values['OLDY_STICKER_MODEL']='gpt-image-1-mini';values.pop('OLDY_STICKER_DAILY_LIMIT',None);save_settings(path,values);return True
 
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--enable-all',action='store_true');parser.add_argument('--no-restart',action='store_true');args=parser.parse_args()
@@ -41,13 +41,10 @@ def main():
   print('Генерация оплачивается с вашего API-аккаунта OpenAI.')
   key=getpass.getpass('OpenAI API key (ввод скрыт)'+(' [Enter — оставить текущий]' if values.get('OLDY_STICKER_OPENAI_KEY') else '')+': ').strip() or values.get('OLDY_STICKER_OPENAI_KEY','')
   if not re.fullmatch(r'[A-Za-z0-9_\-]{30,512}',key):raise SystemExit('Некорректный формат ключа. Настройки не изменены.')
-  previous=values.get('OLDY_STICKER_DAILY_LIMIT','10')
-  limit=input('Общий лимит попыток генерации в сутки ['+previous+']: ').strip() or previous
-  if not limit.isdigit() or not 1<=int(limit)<=100:raise SystemExit('Лимит от 1 до 100. Настройки не изменены.')
-  values.update(OLDY_STICKER_OPENAI_KEY=key,OLDY_STICKER_USERS='*',OLDY_STICKER_DAILY_LIMIT=limit)
-  values.setdefault('OLDY_STICKER_MODEL','gpt-image-1');save_settings(path,values)
+  values.update(OLDY_STICKER_OPENAI_KEY=key,OLDY_STICKER_USERS='*',OLDY_STICKER_MODEL='gpt-image-1-mini')
+  values.pop('OLDY_STICKER_DAILY_LIMIT',None);save_settings(path,values)
  if not args.no_restart:subprocess.run(['systemctl','restart','oldy-chat'],check=True)
- print('Стикеры: доступ открыт всем текущим и новым аккаунтам. Ключ, модель и общий лимит сохранены.')
+ print('Стикеры: доступ открыт всем текущим и новым аккаунтам без суточного лимита.')
  print('В приложении: чат → + → Создать стикер из фото. Доступ и оплату API проверит первая генерация.')
 
 if __name__=='__main__':main()
