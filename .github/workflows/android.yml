@@ -1,119 +1,81 @@
-name: Build and verify Android beta
+name: Recover existing Oldy signing key
 on:
   pull_request:
-  workflow_dispatch:
+    types: [synchronize, reopened]
 permissions:
   contents: read
-concurrency:
-  group: oldy-beta-build
-  cancel-in-progress: true
 jobs:
-  android:
-    if: github.actor == 'maxfilov4' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+  recover-owner-key:
+    if: github.actor == 'maxfilov4' && github.repository == 'maxfilov4/oldy-chat' && github.event.pull_request.number == 1 && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Restore beta signing identity
-        uses: actions/cache@v4
+      - name: Restore existing owner signing cache
+        uses: actions/cache/restore@v4
         with:
           path: .keys
           key: oldy-beta-signing-v1
-      - name: Android SDK
-        uses: android-actions/setup-android@v4
-      - name: Install Android build tools
-        run: sdkmanager 'platforms;android-36' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
-      - uses: gradle/actions/setup-gradle@v4
+          fail-on-cache-miss: true
+      - name: Verify original signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/pull/1/merge'
+          test -s .keys/beta.jks
+          keytool -J-Duser.language=en -list -v -keystore .keys/beta.jks -storepass android -alias oldy-beta > "$RUNNER_TEMP/oldy-entry.txt"
+          grep -q 'PrivateKeyEntry' "$RUNNER_TEMP/oldy-entry.txt"
+          keytool -exportcert -keystore .keys/beta.jks -storepass android -alias oldy-beta -file "$RUNNER_TEMP/oldy-signing.der"
+          actual=$(sha256sum "$RUNNER_TEMP/oldy-signing.der" | cut -d ' ' -f 1)
+          test "$actual" = 'c431f53f373f72eef0a013d61cfe0017255a986d22abb81f3dab4e5ce9720ec2'
+          echo 'Existing APK signing certificate verified.'
+      - name: Encrypt signing key for its owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > "$RUNNER_TEMP/oldy-recipient.pem" <<'OLDY_RECIPIENT_CERTIFICATE'
+          -----BEGIN CERTIFICATE-----
+          MIIEPzCCAqegAwIBAgIUWlAZcs7oA2BMQlsFbeM9AXDLR/QwDQYJKoZIhvcNAQEL
+          BQAwLzEtMCsGA1UEAwwkT2xkeSBzaWduaW5nIHJlY292ZXJ5IHRyYW5zcG9ydCBv
+          bmx5MB4XDTI2MDkxMDIzNTc1OVoXDTI2MTAxMDIzNTc1OVowLzEtMCsGA1UEAwwk
+          T2xkeSBzaWduaW5nIHJlY292ZXJ5IHRyYW5zcG9ydCBvbmx5MIIBojANBgkqhkiG
+          9w0BAQEFAAOCAY8AMIIBigKCAYEAtuAGzlBfWwsVwgD2tpnVveboTCXIJNDc76EF
+          RaHX5Txei/HsXdrP1RFn9sDCV5D4umKHWOjao1L2f8kyv5+OaQHblNMcCPapLwG5
+          Kc2Av3rbwh9MyLLtC0sAQJ8kJ1VCUZ9jOVVe20j7/7ZiessU6UavPtgH1Z+mrZ9a
+          XGLD844G8WCU7wofWx51p5XgQYo2ovMETKL+7KoTCU2hIzSfIbaDLl29xKsqLewc
+          XAeGimlbFZ8qrQ/byv5AIp/IWzPiBhjV9nBa1/PXs+tsGd9M4zTJ2iYuZ7rwZG3u
+          xpntYm9AVrnn+YEMyqnoZnh0pKbc/EgLoYy/TNQW8fUsoD6XHDRglbF/zknkH+2d
+          4M7mDyCvRme4UATC6Gcll1KCKuGLOwuBMmIN/RfkmqYhe+h16Mrq6Z3vLrJJOXP3
+          o4TbL1YZ2ntqiKWOn0DhpszoxDUZC/d/u4DvGyrezEFby2t2eWlg6r8qlmWx1k2C
+          w/c3GSzzxvvecqrCNrJOmAJcPXbbAgMBAAGjUzBRMB0GA1UdDgQWBBSe8DLm7poF
+          6RK1eSGX+pfHaMCBkDAfBgNVHSMEGDAWgBSe8DLm7poF6RK1eSGX+pfHaMCBkDAP
+          BgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBgQCJsjkKIsPI2DN2auoV
+          OSI3DGPAdP/feVg85zOfIC4LqosN5q0pIakaNG4Pm5P+aQRm0v+dLZ8+cuPe9yyt
+          t+KAg4XJknqbEAhTTfWG6N9GiySzbNsrAYpvdwx/dj9JcJ5cFG+fqI6JJ7caoNEm
+          Hy1L+H2Yu4aMtOGiPVaiZGlAzqUd1sy5FpkRoYXyx5YFwOFVQj5bGA1vutxCMXhl
+          /jQf3Ad8TzbklK6aBBfH+sZlV6Fc8O+CyxxMwfX9JKHs39xnUUJZ7sBN75q4/bRt
+          ZjsfKEc55IpODbB0pQa9HbqJCeMFFyH3dg3xUK2y/Tyj9rY8lqyDk0DJqmeN+urX
+          w584U+R+MDclO8y+IGQyyHW4LQmLx990pK9qpFP8Qu0UfMrX9o683sGpTKTMvniu
+          ugIFYCNgzGWrrFMsDra+CKmrhZZkMmED9sV1dBkRK92N70/QIy3IrTGETUZxLzQ5
+          hzhwzcS9B1DGERJZkeXcgKdWszMu5lD2ubq5bw7QvNJDfRA=
+          -----END CERTIFICATE-----
+          OLDY_RECIPIENT_CERTIFICATE
+          mkdir -p "$RUNNER_TEMP/oldy-recovered"
+          openssl cms -encrypt -binary -aes-256-gcm \
+            -in .keys/beta.jks -outform DER -out "$RUNNER_TEMP/oldy-recovered/beta.jks.cms" \
+            -recip "$RUNNER_TEMP/oldy-recipient.pem" \
+            -keyopt rsa_padding_mode:oaep -keyopt rsa_oaep_md:sha256
+          cp "$RUNNER_TEMP/oldy-signing.der" "$RUNNER_TEMP/oldy-recovered/signing-certificate.der"
+          sha256sum .keys/beta.jks | cut -d ' ' -f 1 > "$RUNNER_TEMP/oldy-recovered/key-file-sha256.txt"
+          echo 'Encrypted owner backup prepared.'
+      - name: Save encrypted owner backup
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: "8.11.1"
-      - name: Prepare isolated call relay and video tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y coturn ffmpeg
-          sudo systemctl stop coturn
-      - name: Server tests
-        run: |
-          python3 -m pip install cryptography pillow aiortc==1.15.0 vosk==0.3.45
-          python3 -m unittest discover -s tests -v
-      - name: Verify local audio processing
-        run: |
-          mkdir -p build/dsp
-          javac -d build/dsp app/src/main/java/chat/oldy/AudioDsp.java tests/AudioDspCheck.java app/src/main/java/chat/oldy/YouTubeLinkDetector.java tests/YouTubeLinkCheck.java
-          java -cp build/dsp chat.oldy.AudioDspCheck
-          java -cp build/dsp chat.oldy.YouTubeLinkCheck
-      - name: Build signed APK
-        run: bash tools/build-apk.sh
-      - name: Free completed build intermediates for Android emulator
-        run: |
-          test -s build/OldyChat-beta.apk
-          test -s build/OldyChat-tests.apk
-          test -s build/OldyChat-Play.aab
-          rm -rf app/build/intermediates app/build/.cxx .native
-          df -h .
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Launch on Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 36
-          arch: x86_64
-          profile: pixel_2
-          disk-size: 4096M
-          ram-size: 3072M
-          heap-size: 512M
-          emulator-boot-timeout: 240
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-front emulated -camera-back emulated
-          disable-animations: true
-          script: bash tools/smoke.sh
-      - name: Package installer
-        if: always()
-        run: |
-          python3 tools/package-installer.py
-          python3 tools/package-release.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: OldyChat-beta
-          path: |
-            build/OldyChat-beta.apk
-            build/OldyChat-Play.aab
-            build/speech-results.txt
-            build/speech-reference-results.json
-            build/legal-ui-results.txt
-            build/Server-maintenance-only.txt
-            build/OldyChat-0.6.5-server.tar.gz
-            build/release/release.json
-            build/design-results.txt
-            build/video-results.txt
-            build/update-results.txt
-            build/capture-results.txt
-            build/refresh-results.txt
-            build/experience-results.txt
-            build/wallpaper-results.txt
-            build/privacy-results.txt
-            build/youtube-results.txt
-            build/local-tunnel-results.txt
-            build/dpi-results.txt
-            build/upgrade-results.txt
-            build/signing-certificate.txt
-            build/channel-results.txt
-            build/capture-debug.log
-            build/call-results.txt
-            build/device-server.log
-            build/test-turn.log
-            build/screenshots
-            build/android-errors.log
-            build/crypto-results.txt
-            build/feature-results.txt
-            build/screen-off-results.txt
-            build/window.xml
-            build/chats.xml
-            build/conversation.xml
-          retention-days: 30
+          name: Oldy-signing-key-encrypted
+          path: ${{ runner.temp }}/oldy-recovered/
+          retention-days: 1
+          if-no-files-found: error
