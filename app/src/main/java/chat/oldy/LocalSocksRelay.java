@@ -26,7 +26,21 @@ final class LocalSocksRelay implements Closeable {
   String host=classifier.host(target.ip);if(host==null||target.port!=443){reply(out,2,0);return;}
   Socket remote=null;try{remote=connect(host);resources.add(remote);reply(out,0,0);Socket connected=remote;local.setSoTimeout(120000);connected.setSoTimeout(120000);pool.execute(()->{try{copy(connected.getInputStream(),local.getOutputStream());}catch(Exception ignored){}finally{discard(local);discard(connected);}});copy(in,connected.getOutputStream());}finally{if(remote!=null)discard(remote);}
  }
- Socket connect(String host)throws Exception{Network network=NetworkDiagnostics.physical(service);if(network==null)throw new IOException("No physical network");Exception failure=new IOException("Connection unavailable");for(InetAddress ip:network.getAllByName(host)){if(!TrafficClassifier.publicAddress(ip))continue;Socket s=new Socket();try{if(!service.protect(s))throw new IOException("Socket protection failed");network.bindSocket(s);s.setTcpNoDelay(classifier.rules.tcpNoDelay);s.connect(new InetSocketAddress(ip,443),7000);return s;}catch(Exception e){failure=e;s.close();}}throw failure;}
+ Socket connect(String host)throws Exception{
+  Network network=NetworkDiagnostics.physical(service);if(network==null)throw new IOException("No physical network");Exception failure=new IOException("Connection unavailable");String failedAt="RESOLVE";
+  for(InetAddress ip:network.getAllByName(host)){if(!TrafficClassifier.publicAddress(ip))continue;Socket s=new Socket();String stage="CREATE";
+   try{
+    // Socket() is lazy on Android. This public option creates its native descriptor
+    // before protect(Socket), which otherwise receives an unopened descriptor.
+    s.setTcpNoDelay(classifier.rules.tcpNoDelay);stage="PROTECT";
+    if(!service.protect(s))throw new IOException("Socket protection failed");
+    stage="BIND";network.bindSocket(s);stage="CONNECT";s.connect(new InetSocketAddress(ip,443),7000);return s;
+   }catch(Exception e){failure=e;failedAt=stage;s.close();}
+  }
+  // Bounded error codes only: no host, IP, URL, cookies or payload in diagnostics.
+  TunnelStateRepository.error="DIRECT_TCP_"+failedAt+"_"+failure.getClass().getSimpleName();
+  throw failure;
+ }
  static void copy(InputStream in,OutputStream out)throws IOException{byte[] b=new byte[32768];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}
  static void reply(DataOutputStream out,int code,int port)throws IOException{out.write(new byte[]{5,(byte)code,0,1,127,0,0,1,(byte)(port>>8),(byte)port});out.flush();}
  static final class Address {final InetAddress ip;final int port;Address(InetAddress a,int p){ip=a;port=p;}}
