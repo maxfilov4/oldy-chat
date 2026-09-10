@@ -5,7 +5,7 @@ import java.io.*;import java.net.*;import java.util.*;import javax.net.ssl.Https
 /** Physical-network DNS with bounded HTTPS fallback for compiled YouTube roots only.
  * No message text, URL, token or cookies are sent to the DNS provider. */
 final class DirectDns {
- static final Map<String,Entry> cache=Collections.synchronizedMap(new LinkedHashMap<String,Entry>(){protected boolean removeEldestEntry(Map.Entry<String,Entry> e){return size()>256;}});
+ static final Map<String,Entry> cache=Collections.synchronizedMap(new LinkedHashMap<String,Entry>(){protected boolean removeEldestEntry(Map.Entry<String,DirectDns.Entry> e){return size()>256;}});
  static final class Entry{final long time=SystemClock.elapsedRealtime();final InetAddress[] values;Entry(InetAddress[] a){values=a;}}
  static InetAddress[] resolve(Network network,String host)throws Exception{
   String key=network.getNetworkHandle()+":"+host;Entry old=cache.get(key);if(old!=null&&SystemClock.elapsedRealtime()-old.time<60000)return old.values;
