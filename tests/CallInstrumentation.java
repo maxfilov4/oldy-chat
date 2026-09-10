@@ -5,7 +5,17 @@ public class CallInstrumentation extends Instrumentation {
  public void onCreate(Bundle b){start();}
  void check(boolean b,String reason)throws Exception{if(!b)throw new Exception(reason);}
  interface Condition{boolean value()throws Exception;}
- void until(Condition c,long timeout,String reason)throws Exception{long end=SystemClock.elapsedRealtime()+timeout;while(SystemClock.elapsedRealtime()<end){if(c.value())return;Thread.sleep(180);}throw new Exception(reason+" / "+(LiveCall.current==null?"no active call":LiveCall.current.state));}
+ void until(Condition c,long timeout,String reason)throws Exception{
+  long end=SystemClock.elapsedRealtime()+timeout;java.net.SocketException lastDisconnect=null;
+  while(SystemClock.elapsedRealtime()<end){
+   // Android can close an in-flight status GET when the call foreground service
+   // stops. Re-poll the read-only fixture within the original deadline; never
+   // retry start/ring mutations, peer errors, TLS failures or failed assertions.
+   try{if(c.value())return;}catch(java.net.SocketException e){lastDisconnect=e;}
+   Thread.sleep(180);
+  }
+  throw new Exception(reason+" / "+(LiveCall.current==null?"no active call":LiveCall.current.state),lastDisconnect);
+ }
  JSONObject peer(Api api)throws Exception{JSONObject j=api.call("/test-call/status",null,"");check(j.optString("error").isEmpty(),"Independent peer failed: "+j.optString("error"));return j;}
  double[] stats(LiveCall.Session call)throws Exception{
   CountDownLatch done=new CountDownLatch(1);double[] values=new double[4];
