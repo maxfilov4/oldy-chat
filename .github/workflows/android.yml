@@ -73,7 +73,7 @@ jobs:
           path: |
             build/OldyChat-beta.apk
             build/Server-maintenance-only.txt
-            build/OldyChat-0.6.0-server.tar.gz
+            build/OldyChat-0.6.1-server.tar.gz
             build/release/release.json
             build/design-results.txt
             build/video-results.txt
@@ -85,6 +85,8 @@ jobs:
             build/privacy-results.txt
             build/youtube-results.txt
             build/local-tunnel-results.txt
+            build/dpi-results.txt
+            build/upgrade-results.txt
             build/signing-certificate.txt
             build/channel-results.txt
             build/capture-debug.log

@@ -444,9 +444,9 @@ def storage_worker():
   time.sleep(20)
 
 
-YOUTUBE_ROOTS=('youtube.com','youtube-nocookie.com','youtu.be','googlevideo.com','ytimg.com','youtubei.googleapis.com','youtube.googleapis.com','ggpht.com')
+YOUTUBE_ROOTS=('youtube.com','youtube-nocookie.com','youtu.be','googlevideo.com','ytimg.com','youtubei.googleapis.com','youtube.googleapis.com','ggpht.com','accounts.google.com','accounts.google.ru','oauth2.googleapis.com','gstatic.com','googleusercontent.com')
 def youtube_network_config():
- default={'version':1,'enabled':True,'tcp_no_delay':True,'domains':list(YOUTUBE_ROOTS)}
+ default={'version':2,'enabled':True,'tcp_no_delay':True,'domains':list(YOUTUBE_ROOTS)}
  path=ROOT/'youtube-rules.json'
  if not path.exists():return default
  try:

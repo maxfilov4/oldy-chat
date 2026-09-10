@@ -1,18 +1,18 @@
 package chat.oldy;
 
-import android.net.Network;
+import android.net.Network;import android.net.LocalSocket;
 import java.io.*;import java.net.*;import java.nio.charset.StandardCharsets;import java.security.MessageDigest;import java.util.*;import java.util.concurrent.*;
 
 /** Authenticated loopback-only SOCKS5 endpoint for the native TCP/IP stack.
  * Only virtual DNS and already classified YouTube:443 destinations are accepted.
  * Every outbound socket is protected and explicitly bound to a physical network.
- * TLS/HTTP2/QUIC remain opaque bytes; no certificate interception or video parsing. */
+ * TLS/HTTP2 stay encrypted; ByeDPI adjusts initial handshake transport. QUIC uses TCP fallback. */
 final class LocalSocksRelay implements Closeable {
- final LocalTunnelService service;final TrafficClassifier classifier;final ServerSocket server;
+ final LocalTunnelService service;final TrafficClassifier classifier;final ServerSocket server;final LocalDpiEngine dpi;
  final String password=UUID.randomUUID().toString();final Set<Closeable> resources=ConcurrentHashMap.newKeySet();
  final ExecutorService pool=new ThreadPoolExecutor(0,200,30,TimeUnit.SECONDS,new SynchronousQueue<>());
  final Semaphore sessions=new Semaphore(80);volatile boolean closed;
- LocalSocksRelay(LocalTunnelService s,TrafficClassifier c)throws Exception{service=s;classifier=c;server=new ServerSocket();server.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"),0),32);server.setSoTimeout(1000);resources.add(server);pool.execute(this::accept);}
+ LocalSocksRelay(LocalTunnelService s,TrafficClassifier c,LocalDpiEngine d)throws Exception{service=s;classifier=c;dpi=d;server=new ServerSocket();server.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"),0),32);server.setSoTimeout(1000);resources.add(server);pool.execute(this::accept);}
  int port(){return server.getLocalPort();}
  void accept(){while(!closed)try{Socket local=server.accept();if(!sessions.tryAcquire()){local.close();continue;}resources.add(local);try{pool.execute(()->{try{client(local);}catch(Exception ignored){}finally{discard(local);sessions.release();}});}catch(RejectedExecutionException rejected){discard(local);sessions.release();}}catch(SocketTimeoutException ignored){}catch(IOException failed){if(!closed)service.relayFailed();return;}}
  void client(Socket local)throws Exception{
@@ -24,23 +24,14 @@ final class LocalSocksRelay implements Closeable {
   if(command==3){udp(local,in,out);return;}if(command!=1){reply(out,7,0);return;}
   if(target.ip.getHostAddress().equals(TrafficClassifier.DNS)&&target.port==53){reply(out,0,0);while(!closed){int n=in.readUnsignedShort();if(n<17||n>4096)return;byte[] q=new byte[n];in.readFully(q);byte[] a=LocalDns.answer(q,classifier,NetworkDiagnostics.physical(service));out.writeShort(a.length);out.write(a);out.flush();}return;}
   String host=classifier.host(target.ip);if(host==null||target.port!=443){reply(out,2,0);return;}
-  Socket remote=null;try{remote=connect(host);resources.add(remote);reply(out,0,0);Socket connected=remote;local.setSoTimeout(120000);connected.setSoTimeout(120000);pool.execute(()->{try{copy(connected.getInputStream(),local.getOutputStream());}catch(Exception ignored){}finally{discard(local);discard(connected);}});copy(in,connected.getOutputStream());}finally{if(remote!=null)discard(remote);}
+  LocalSocket remote=null;try{remote=connect(host);resources.add(remote);reply(out,0,0);LocalSocket connected=remote;local.setSoTimeout(120000);pool.execute(()->{try{copy(connected.getInputStream(),local.getOutputStream());}catch(Exception ignored){}finally{discard(local);discard(connected);}});copy(in,connected.getOutputStream());}finally{if(remote!=null)discard(remote);}
  }
- Socket connect(String host)throws Exception{
-  Network network=NetworkDiagnostics.physical(service);if(network==null)throw new IOException("No physical network");Exception failure=new IOException("Connection unavailable");String failedAt="RESOLVE";
-  for(InetAddress ip:network.getAllByName(host)){if(!TrafficClassifier.publicAddress(ip))continue;Socket s=new Socket();String stage="CREATE";
-   try{
-    // Socket() is lazy on Android. This public option creates its native descriptor
-    // before protect(Socket), which otherwise receives an unopened descriptor.
-    s.setTcpNoDelay(classifier.rules.tcpNoDelay);stage="PROTECT";
-    if(!service.protect(s))throw new IOException("Socket protection failed");
-    stage="BIND";network.bindSocket(s);stage="CONNECT";s.connect(new InetSocketAddress(ip,443),7000);return s;
-   }catch(Exception e){failure=e;failedAt=stage;s.close();}
-  }
-  // Bounded error codes only: no host, IP, URL, cookies or payload in diagnostics.
-  TunnelStateRepository.error="DIRECT_TCP_"+failedAt+"_"+failure.getClass().getSimpleName();
-  throw failure;
+ LocalSocket connect(String host)throws Exception{
+  Network network=NetworkDiagnostics.physical(service);if(network==null)throw new IOException("NO_NETWORK");Exception failure=new IOException("DPI_DNS");
+  for(InetAddress address:DirectDns.resolve(network,host)){if(!TrafficClassifier.publicAddress(address))continue;try{return dpi.connect(address);}catch(Exception e){failure=e;}}
+  TunnelStateRepository.error="DPI_TCP_"+failure.getClass().getSimpleName();throw failure;
  }
+
  static void copy(InputStream in,OutputStream out)throws IOException{byte[] b=new byte[32768];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}
  static void reply(DataOutputStream out,int code,int port)throws IOException{out.write(new byte[]{5,(byte)code,0,1,127,0,0,1,(byte)(port>>8),(byte)port});out.flush();}
  static final class Address {final InetAddress ip;final int port;Address(InetAddress a,int p){ip=a;port=p;}}
@@ -53,7 +44,7 @@ final class LocalSocksRelay implements Closeable {
    InetSocketAddress from=(InetSocketAddress)packet.getSocketAddress();if(sender[0]==null)sender[0]=from;else if(!sender[0].equals(from))continue;
    DataInputStream data=new DataInputStream(new ByteArrayInputStream(buffer,0,packet.getLength()));if(data.readUnsignedShort()!=0||data.readUnsignedByte()!=0)continue;Address target=readAddress(data);byte[] raw=new byte[data.available()];data.readFully(raw);
    if(target.ip.getHostAddress().equals(TrafficClassifier.DNS)&&target.port==53){try{byte[] answer=LocalDns.answer(raw,classifier,NetworkDiagnostics.physical(service));byte[] framed=udpPacket(target,answer,answer.length);local.send(new DatagramPacket(framed,framed.length,from));}catch(Exception ignored){}continue;}
-   String host=classifier.host(target.ip);if(host==null||target.port!=443)continue;String key=target.ip.getHostAddress();DatagramSocket remote=flows.get(key);
+   String host=classifier.host(target.ip);if(host==null||target.port!=443)continue;if(dpi!=null)continue;String key=target.ip.getHostAddress();DatagramSocket remote=flows.get(key);
    if(remote==null){if(flows.size()>=24)continue;Network physical=NetworkDiagnostics.physical(service);if(physical==null)continue;InetAddress real=null;for(InetAddress ip:physical.getAllByName(host))if(TrafficClassifier.publicAddress(ip)){real=ip;break;}if(real==null)continue;
     remote=new DatagramSocket(null);try{if(!service.protect(remote))throw new IOException();physical.bindSocket(remote);remote.bind(new InetSocketAddress(0));remote.connect(real,443);remote.setSoTimeout(30000);}catch(Exception failure){remote.close();continue;}resources.add(remote);flows.put(key,remote);DatagramSocket outbound=remote;
     pool.execute(()->{try{byte[] incoming=new byte[65535];while(!closed&&!control.isClosed()){DatagramPacket response=new DatagramPacket(incoming,incoming.length);outbound.receive(response);byte[] framed=udpPacket(target,response.getData(),response.getLength());local.send(new DatagramPacket(framed,framed.length,from));}}catch(Exception ignored){}finally{flows.remove(key,outbound);discard(outbound);}});

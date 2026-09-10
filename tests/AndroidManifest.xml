@@ -16,4 +16,5 @@
  <instrumentation android:name="chat.oldy.PrivacyInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.YouTubeInstrumentation" android:targetPackage="chat.oldy"/>
  <instrumentation android:name="chat.oldy.LocalTunnelInstrumentation" android:targetPackage="chat.oldy"/>
+ <instrumentation android:name="chat.oldy.UpgradeInstrumentation" android:targetPackage="chat.oldy"/>
 </manifest>

@@ -16,7 +16,7 @@ final class VoiceGesture implements View.OnTouchListener {
    pointer=e.getPointerId(0);startX=e.getRawX();cancelled=false;a.mediaTarget=a.chat;
    if(a.voice==null)a.voice=new VoiceCapture(a);
    holding=a.voice.begin();
-   if(holding){v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);v.getParent().requestDisallowInterceptTouchEvent(true);}
+   if(holding){a.heldVoice=this;a.heldVoiceView=v;v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);v.getParent().requestDisallowInterceptTouchEvent(true);}
    return true;
   }
   if(action==MotionEvent.ACTION_MOVE&&holding){
@@ -35,5 +35,5 @@ final class VoiceGesture implements View.OnTouchListener {
   return holding;
  }
  void cancel(View v){if(holding)a.voice.end(false);finish(v);}
- void finish(View v){holding=false;pointer=-1;if(v.getParent()!=null)v.getParent().requestDisallowInterceptTouchEvent(false);}
+ void finish(View v){a.heldVoice=null;a.heldVoiceView=null;holding=false;pointer=-1;if(v.getParent()!=null)v.getParent().requestDisallowInterceptTouchEvent(false);}
 }

@@ -113,6 +113,9 @@ adb shell pm grant chat.oldy android.permission.CAMERA
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt
 cat build/capture-results.txt
 grep -q 'OLDY_CAPTURE_PASS' build/capture-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpgradeInstrumentation > build/upgrade-results.txt
+cat build/upgrade-results.txt
+grep -q OLDI_UPGRADE_PASS build/upgrade-results.txt
 timeout 200s adb shell am instrument -w chat.oldy.tests/chat.oldy.CallInstrumentation > build/call-results.txt
 cat build/call-results.txt
 grep -q 'OLDY_CALL_PASS' build/call-results.txt

@@ -6,6 +6,10 @@ if [[ ! -f .keys/beta.jks ]]; then
  exit 1
 fi
 bash tools/prepare-tunnel.sh
+bash tools/prepare-dpi.sh
+make -C .native/byedpi -j2
+mkdir -p build
+python3 tools/check-dpi.py .native/byedpi/ciadpi | tee build/dpi-results.txt
 gradle --no-daemon :app:assembleRelease :app:assembleReleaseAndroidTest
 mkdir -p build
 cp app/build/outputs/apk/release/app-release.apk build/OldyChat-beta.apk

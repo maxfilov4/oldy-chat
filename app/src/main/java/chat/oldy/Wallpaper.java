@@ -2,9 +2,9 @@ package chat.oldy;
 import android.graphics.*;import android.graphics.drawable.Drawable;
 /** Distinct color palettes and original device-resolution art for each wallpaper. */
 final class Wallpaper extends Drawable {
- static final String[] NAMES={"Аркада · синий","Созвездия · фиолетовый","Мягкий песок · бежевый","Киберпанк · неон","Гараж · графит и красный","Лес · зелёный","Закат на трассе · терракота","Горы · бирюзовый"};
- static final int[][] LIGHT={{0xffc7e1fa,0xff94bfd9},{0xffd6c1ef,0xffb29bd9},{0xffeddbbc,0xffcfad86},{0xffc0b9e6,0xff91c7d2},{0xffc2c7d2,0xffb29cae},{0xffc3dec1,0xff91bba7},{0xfff2ceaa,0xffd59f94},{0xffbde1e2,0xff94bdd6}};
- static final int[][] DARK={{0xff142943,0xff183b4d},{0xff392848,0xff282245},{0xff564234,0xff352e29},{0xff30163f,0xff082f40},{0xff28313d,0xff412431},{0xff183b31,0xff123733},{0xff654333,0xff432632},{0xff173c47,0xff1e314b}};
+ static final String[] NAMES={"Аркада · синий","Созвездия · фиолетовый","Мягкий песок · бежевый","Киберпанк · неон","Гараж · графит и красный","Лес · зелёный","Закат на трассе · терракота","Горы · бирюзовый","Океан · лазурный","Сакура · розовый","Космос · индиго","Мята · свежий","Пиксели · янтарный","Лаванда · сиреневый","Граффити · малиновый","Луна · серебристый"};
+ static final int[][] LIGHT={{0xffc7e1fa,0xff94bfd9},{0xffd6c1ef,0xffb29bd9},{0xffeddbbc,0xffcfad86},{0xffc0b9e6,0xff91c7d2},{0xffc2c7d2,0xffb29cae},{0xffc3dec1,0xff91bba7},{0xfff2ceaa,0xffd59f94},{0xffbde1e2,0xff94bdd6},{0xffb7e5f2,0xff7bb5d5},{0xfff4cfe1,0xffdfa6c7},{0xffc6c5ed,0xff939ed4},{0xffc3efe0,0xff94cbbc},{0xfff6dfb2,0xffdeba87},{0xffe2d5f4,0xffb6a3d8},{0xfff2bed4,0xffcb93b1},{0xffe0e5ed,0xffa6b3c6}};
+ static final int[][] DARK={{0xff142943,0xff183b4d},{0xff392848,0xff282245},{0xff564234,0xff352e29},{0xff30163f,0xff082f40},{0xff28313d,0xff412431},{0xff183b31,0xff123733},{0xff654333,0xff432632},{0xff173c47,0xff1e314b},{0xff0e3552,0xff143a48},{0xff4c2540,0xff2d233a},{0xff171b43,0xff29214d},{0xff163a34,0xff12302d},{0xff503824,0xff332936},{0xff342846,0xff24283d},{0xff50253f,0xff242c48},{0xff293644,0xff182331}};
  final boolean light;final int style;final Paint p=new Paint(3);int alpha=255;
  Wallpaper(boolean l,int s){light=l;style=Math.floorMod(s,NAMES.length);}
  public void draw(Canvas canvas){Rect bounds=getBounds();if(bounds.isEmpty())return;Canvas c=canvas;c.save();c.translate(bounds.left,bounds.top);float w=bounds.width(),h=bounds.height();int[] colors=(light?LIGHT:DARK)[style];p.setStyle(Paint.Style.FILL);p.setAlpha(alpha);p.setShader(new LinearGradient(0,0,w,h,colors[0],colors[1],Shader.TileMode.CLAMP));c.drawRect(0,0,w,h,p);p.setShader(null);
@@ -17,6 +17,14 @@ final class Wallpaper extends Drawable {
    else if(style==3){c.drawLine(-24,-16,12,-16,p);c.drawLine(12,-16,26,-2,p);c.drawLine(26,-2,26,20,p);c.drawCircle(-26,-16,3,p);c.drawCircle(26,22,3,p);c.drawRect(-14,-6,8,14,p);c.drawLine(-21,26,7,26,p);}
    else if(style==4||style==6){if(n<2)car(c);else{c.drawCircle(0,0,23,p);c.drawCircle(0,0,8,p);for(int j=0;j<5;j++){c.save();c.rotate(j*72);c.drawLine(0,8,0,23,p);c.restore();}}}
    else if(style==5){if(n<2){Path leaf=new Path();leaf.moveTo(0,24);leaf.cubicTo(-37,-2,-12,-30,18,-31);leaf.cubicTo(34,-2,18,18,0,24);c.drawPath(leaf,p);c.drawLine(-5,30,16,-23,p);c.drawLine(2,12,-12,-2,p);c.drawLine(8,-3,22,-6,p);}else{Path tree=new Path();tree.moveTo(0,-29);tree.lineTo(-22,13);tree.lineTo(22,13);tree.close();c.drawPath(tree,p);c.drawLine(0,13,0,28,p);}}
+   else if(style==8){for(int k=0;k<3;k++){Path wave=new Path();wave.moveTo(-34,k*11-12);wave.cubicTo(-12,k*11-34,10,k*11+10,34,k*11-12);c.drawPath(wave,p);}}
+   else if(style==9){for(int k=0;k<5;k++){c.save();c.rotate(k*72);c.drawOval(-7,-25,7,-3,p);c.restore();}c.drawCircle(0,0,4,p);}
+   else if(style==10){c.drawCircle(0,0,18,p);c.save();c.rotate(-25);c.drawOval(-35,-8,35,8,p);c.restore();star(c,29,-25,6);}
+   else if(style==11){c.drawOval(-26,-24,0,7,p);c.drawOval(0,-12,26,20,p);c.drawLine(-17,-13,16,23,p);}
+   else if(style==12){for(int k=0;k<5;k++){int xx=(k%3)*11-18,yy=(k/3)*11-9;c.drawRect(xx,yy,xx+10,yy+10,p);}game(c,n);}
+   else if(style==13){c.drawLine(0,29,0,-29,p);for(int k=0;k<4;k++){c.drawOval(-13,-26+k*12,0,-17+k*12,p);c.drawOval(0,-22+k*12,13,-13+k*12,p);}}
+   else if(style==14){c.rotate(-15);c.drawRoundRect(-28,-15,28,15,7,7,p);c.drawLine(-18,5,-6,-6,p);c.drawLine(-6,-6,6,5,p);c.drawLine(6,5,19,-7,p);star(c,24,-24,8);}
+   else if(style==15){c.drawArc(-21,-24,21,24,60,270,false,p);c.drawArc(-10,-24,32,22,80,210,false,p);c.drawCircle(28,-22,2,p);}
    else{Path mountains=new Path();mountains.moveTo(-36,22);mountains.lineTo(-8,-22);mountains.lineTo(20,22);mountains.moveTo(7,2);mountains.lineTo(24,-17);mountains.lineTo(45,22);c.drawPath(mountains,p);c.drawCircle(27,-32,7,p);c.drawLine(-30,30,40,30,p);}
    c.restore();}
   p.setStyle(Paint.Style.FILL);c.restore();

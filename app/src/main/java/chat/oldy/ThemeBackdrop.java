@@ -11,10 +11,10 @@ final class ThemeBackdrop extends Drawable {
  ThemeBackdrop(Context c,boolean light,boolean cyber){
   this.light=light;style=Math.floorMod(Notices.prefs(c).getInt("wallpaper",cyber?3:0),Wallpaper.NAMES.length);
   photo=Notices.prefs(c).getBoolean("wallpaper_photo",false)?WallpaperPhoto.load(c):null;
-  int[] colors={0xff63b7ff,0xffb79aff,0xffe2b579,0xff61e9e7,0xffe191ac,0xff70d4b0,0xffffab7c,0xff72dbe1};
-  accent=colors[style];secondary=style==2||style==6?0xffffd8a3:0xffb59bff;
+  accent=mix(0xffffffff,Wallpaper.LIGHT[style][1],.78f);secondary=Wallpaper.LIGHT[(style+1)%Wallpaper.NAMES.length][0];
   glow=Notices.prefs(c).getBoolean("wallpaper_glow",true);
  }
+ static int mix(int a,int b,float t){return Color.rgb(Math.round(Color.red(a)*(1-t)+Color.red(b)*t),Math.round(Color.green(a)*(1-t)+Color.green(b)*t),Math.round(Color.blue(a)*(1-t)+Color.blue(b)*t));}
  static RectF coverRect(int imageWidth,int imageHeight,float width,float height){
   float scale=Math.max(width/imageWidth,height/imageHeight),w=imageWidth*scale,h=imageHeight*scale;
   return new RectF((width-w)/2,(height-h)/2,(width+w)/2,(height+h)/2);
