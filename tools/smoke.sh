@@ -36,6 +36,10 @@ pin=$(cat build/device-server/pin.txt)
 timeout 150s adb shell am instrument -w -e pin "$pin" chat.oldy.tests/chat.oldy.CryptoInstrumentation > build/crypto-results.txt
 cat build/crypto-results.txt
 grep -q 'OLDY_CRYPTO_PASS' build/crypto-results.txt
+adb shell pm grant chat.oldy android.permission.RECORD_AUDIO
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpgradeInstrumentation > build/upgrade-results.txt
+cat build/upgrade-results.txt
+grep -q OLDI_UPGRADE_PASS build/upgrade-results.txt
 # Verify the new wallpaper and contacts flows before the remaining regression suites.
 # Show the software keyboard even when the emulator exposes a hardware keyboard.
 adb shell settings put secure show_ime_with_hard_keyboard 1
@@ -113,9 +117,6 @@ adb shell pm grant chat.oldy android.permission.CAMERA
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.CaptureInstrumentation > build/capture-results.txt
 cat build/capture-results.txt
 grep -q 'OLDY_CAPTURE_PASS' build/capture-results.txt
-timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.UpgradeInstrumentation > build/upgrade-results.txt
-cat build/upgrade-results.txt
-grep -q OLDI_UPGRADE_PASS build/upgrade-results.txt
 timeout 200s adb shell am instrument -w chat.oldy.tests/chat.oldy.CallInstrumentation > build/call-results.txt
 cat build/call-results.txt
 grep -q 'OLDY_CALL_PASS' build/call-results.txt

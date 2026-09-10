@@ -19,6 +19,10 @@ final class UiIcon extends View {
    case "settings":c.drawCircle(12,12,6,paint);c.drawCircle(12,12,2,paint);for(int i=0;i<8;i++){double angle=i*Math.PI/4;c.drawLine(12+6*(float)Math.cos(angle),12+6*(float)Math.sin(angle),12+9*(float)Math.cos(angle),12+9*(float)Math.sin(angle),paint);}break;
    case "shield":p.moveTo(12,2);p.lineTo(21,6);p.lineTo(20,14);p.quadTo(18,20,12,23);p.quadTo(6,20,4,14);p.lineTo(3,6);p.close();c.drawPath(p,paint);p.reset();p.moveTo(8,12);p.lineTo(11,15);p.lineTo(16,9);c.drawPath(p,paint);break;
    case "back":c.drawLine(20,12,4,12,paint);p.moveTo(11,5);p.lineTo(4,12);p.lineTo(11,19);c.drawPath(p,paint);break;
+   case "reply":p.moveTo(10,5);p.lineTo(3,11);p.lineTo(10,17);c.drawPath(p,paint);p.reset();p.moveTo(4,11);p.lineTo(13,11);p.quadTo(21,11,21,20);c.drawPath(p,paint);break;
+   case "copy":c.drawRoundRect(7,6,21,22,2,2,paint);p.moveTo(16,3);p.lineTo(3,3);p.lineTo(3,17);c.drawPath(p,paint);break;
+   case "more":paint.setStyle(Paint.Style.FILL);for(int i=0;i<3;i++)c.drawCircle(5+i*7,12,1.6f,paint);break;
+   case "delete":c.drawLine(3,6,21,6,paint);p.moveTo(8,5);p.lineTo(8,2);p.lineTo(16,2);p.lineTo(16,5);c.drawPath(p,paint);p.reset();p.moveTo(5,7);p.lineTo(7,22);p.lineTo(17,22);p.lineTo(19,7);c.drawPath(p,paint);c.drawLine(10,10,10,18,paint);c.drawLine(14,10,14,18,paint);break;
    case "close":c.drawLine(6,6,18,18,paint);c.drawLine(18,6,6,18,paint);break;
    case "mic":c.drawRoundRect(8,2,16,15,4,4,paint);c.drawArc(4,5,20,20,0,180,false,paint);c.drawLine(12,20,12,23,paint);break;
    case "pause":c.drawLine(8,5,8,19,paint);c.drawLine(16,5,16,19,paint);break;
