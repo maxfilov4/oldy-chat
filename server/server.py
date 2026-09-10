@@ -43,6 +43,7 @@ def init_db(path=None):
  DB.execute('PRAGMA journal_mode=WAL')
  DB.executescript('''CREATE TABLE IF NOT EXISTS users(nick TEXT PRIMARY KEY, name TEXT NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, enc TEXT NOT NULL, sig TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, nick TEXT NOT NULL, expires INTEGER NOT NULL);''')
+ DB.execute('CREATE TABLE IF NOT EXISTS contact_discovery(nick TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0)')
  DB.executescript('''CREATE TABLE IF NOT EXISTS profiles(nick TEXT PRIMARY KEY, avatar TEXT NOT NULL DEFAULT 'preset:0', bio TEXT NOT NULL DEFAULT '');
  CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, avatar TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS members(room TEXT NOT NULL, nick TEXT NOT NULL, PRIMARY KEY(room,nick));''')
@@ -921,6 +922,30 @@ class Handler(BaseHTTPRequestHandler):
     if not isinstance(protocol,int) or protocol<2 or protocol>100:raise Problem(400,'Неверная версия протокола')
     with LOCK:DB.execute('INSERT INTO capabilities VALUES(?,?) ON CONFLICT(nick) DO UPDATE SET protocol=excluded.protocol',(nick,protocol));DB.commit()
     return self.reply({'ok':True})
+   if path=='/contacts/settings' and not post:
+    with LOCK:entry=DB.execute('SELECT enabled FROM contact_discovery WHERE nick=?',(nick,)).fetchone()
+    return self.reply({'discoverable':bool(entry and entry[0]),'match_by':'verified_email'})
+   if path=='/contacts/settings' and post:
+    enabled=data.get('discoverable')
+    if type(enabled) is not bool:raise Problem(400,'Укажите настройку поиска')
+    with LOCK:
+     if enabled and not DB.execute('SELECT 1 FROM emails WHERE nick=? AND verified=1',(nick,)).fetchone():raise Problem(403,'Сначала подтвердите e-mail')
+     DB.execute('INSERT INTO contact_discovery VALUES(?,?) ON CONFLICT(nick) DO UPDATE SET enabled=excluded.enabled',(nick,int(enabled)));DB.commit()
+    return self.reply({'discoverable':enabled,'match_by':'verified_email'})
+   if path=='/contacts/discover' and post:
+    values=data.get('hashes')
+    if not isinstance(values,list) or len(values)>256 or any(not isinstance(v,str) or not re.fullmatch('[a-f0-9]{64}',v) for v in values):raise Problem(400,'Неверный список контактов')
+    rate(('contact-search',nick),20,600);rate(('contact-search-ip',self.client_address[0]),60,600)
+    wanted=set(values);found=[]
+    with LOCK:
+     if not DB.execute('SELECT 1 FROM emails WHERE nick=? AND verified=1',(nick,)).fetchone():raise Problem(403,'Сначала подтвердите e-mail')
+     rows=DB.execute('SELECT e.nick,e.email FROM emails e JOIN contact_discovery d ON d.nick=e.nick WHERE e.verified=1 AND d.enabled=1 AND e.nick!=?',(nick,)).fetchall()
+     for target,email in rows:
+      digest=hashlib.sha256(email.strip().lower().encode()).hexdigest()
+      if digest not in wanted:continue
+      if DB.execute('SELECT 1 FROM blocks WHERE (owner=? AND target=?) OR (owner=? AND target=?)',(nick,target,target,nick)).fetchone():continue
+      found.append({'hash':digest,'user':public_user(target)})
+    return self.reply({'matches':found,'match_by':'verified_email'})
    if path=='/blocks' and not post:
     with LOCK:names=[r[0] for r in DB.execute('SELECT target FROM blocks WHERE owner=?',(nick,))]
     return self.reply({'blocked':names})

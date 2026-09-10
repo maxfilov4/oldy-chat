@@ -66,7 +66,7 @@ class UpdatePublicationTest(unittest.TestCase):
         for _ in range(2):
             publisher.publish_release(self.source, self.destination)
             reply = publisher.verify_update(self.url, self.info)
-            self.assertEqual(reply['version_code'], 7)
+            self.assertEqual(reply['version_code'], self.info['version_code'])
             self.assertTrue(reply['available'])
 
     def test_corrupt_source_cannot_replace_the_published_release(self):
@@ -87,7 +87,7 @@ class UpdatePublicationTest(unittest.TestCase):
 
     def test_old_command_cannot_downgrade_a_newer_release(self):
         publisher.publish_release(self.source, self.destination)
-        newer = dict(self.info, version_code=8)
+        newer = dict(self.info, version_code=self.info['version_code'] + 1)
         (self.destination / 'release.json').write_text(json.dumps(newer))
         with self.assertRaisesRegex(ValueError, 'более новая'):
             publisher.publish_release(self.source, self.destination)

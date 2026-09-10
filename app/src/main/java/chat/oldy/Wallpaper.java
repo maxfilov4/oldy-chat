@@ -3,12 +3,12 @@ import android.graphics.*;import android.graphics.drawable.Drawable;
 /** Distinct color palettes and original device-resolution art for each wallpaper. */
 final class Wallpaper extends Drawable {
  static final String[] NAMES={"Аркада · синий","Созвездия · фиолетовый","Мягкий песок · бежевый","Киберпанк · неон","Гараж · графит и красный","Лес · зелёный","Закат на трассе · терракота","Горы · бирюзовый"};
- static final int[][] LIGHT={{0xffa4c7f0,0xff80b8d6},{0xffb69ce0,0xff967cce},{0xffe2c9a1,0xffc7a77b},{0xff422559,0xff143c52},{0xff76808c,0xff554454},{0xff94b898,0xff67978c},{0xffe6ae84,0xffbb7e6c},{0xff96cace,0xff659db6}};
+ static final int[][] LIGHT={{0xffc7e1fa,0xff94bfd9},{0xffd6c1ef,0xffb29bd9},{0xffeddbbc,0xffcfad86},{0xffc0b9e6,0xff91c7d2},{0xffc2c7d2,0xffb29cae},{0xffc3dec1,0xff91bba7},{0xfff2ceaa,0xffd59f94},{0xffbde1e2,0xff94bdd6}};
  static final int[][] DARK={{0xff142943,0xff183b4d},{0xff392848,0xff282245},{0xff564234,0xff352e29},{0xff30163f,0xff082f40},{0xff28313d,0xff412431},{0xff183b31,0xff123733},{0xff654333,0xff432632},{0xff173c47,0xff1e314b}};
  final boolean light;final int style;final Paint p=new Paint(3);int alpha=255;
  Wallpaper(boolean l,int s){light=l;style=Math.floorMod(s,NAMES.length);}
  public void draw(Canvas canvas){Rect bounds=getBounds();if(bounds.isEmpty())return;Canvas c=canvas;c.save();c.translate(bounds.left,bounds.top);float w=bounds.width(),h=bounds.height();int[] colors=(light?LIGHT:DARK)[style];p.setStyle(Paint.Style.FILL);p.setAlpha(alpha);p.setShader(new LinearGradient(0,0,w,h,colors[0],colors[1],Shader.TileMode.CLAMP));c.drawRect(0,0,w,h,p);p.setShader(null);
-  float density=android.content.res.Resources.getSystem().getDisplayMetrics().density;float cell=(style==4||style==6?112:92)*density;p.setStrokeWidth(1.2f*density);p.setColor(style==3?0x7057e9ec:light?0x48613e53:0x428adbc7);p.setStyle(Paint.Style.STROKE);
+  float density=android.content.res.Resources.getSystem().getDisplayMetrics().density;float cell=(style==4||style==6?112:92)*density;p.setStrokeWidth(1.2f*density);p.setColor(style==3?(light?0x38664e98:0x4057e9ec):light?0x28613e53:0x2a8adbc7);p.setStyle(Paint.Style.STROKE);
   if(style==3){for(float x=0;x<w;x+=cell/2)c.drawLine(x,0,x,h,p);for(float y=0;y<h;y+=cell/2)c.drawLine(0,y,w,y,p);}
   for(int y=0;y<h/cell+1;y++)for(int x=0;x<w/cell+1;x++){c.save();c.translate(x*cell+cell/2+(y%2)*cell/2,y*cell+cell/2);c.scale(density,density);p.setStrokeWidth(1.2f);int n=(x+3*y)%3;
    if(style==0){c.rotate((x+y)%2==0?-14:16);game(c,n);}

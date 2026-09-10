@@ -100,6 +100,33 @@ class RelayTest(unittest.TestCase):
   status,verified=self.request('/email/verify',{'code':code},token);self.assertEqual(status,200);self.assertEqual(verified['email'],new);self.assertEqual(verified['account_number'],number);self.assertEqual(verified['sig'],account['user']['sig'])
   self.assertEqual(self.request('/login/verify',dict(email=old,ticket=old_challenge['ticket'],code=old_code))[0],400)
   _,challenge=self.request('/login/request',{'email':new});self.assertEqual(self.request('/login/verify',dict(email=new,ticket=challenge['ticket'],code=self.mail[new]))[0],200)
+ def contact_account(self):
+  import hashlib
+  name='contact_'+uuid.uuid4().hex[:9];email=name+'@example.test'
+  status,account=self.request('/register',{'nick':name,'email':email,'password':'backup password 123',**self.keys});self.assertEqual(status,200,account)
+  return name,email,hashlib.sha256(email.encode()).hexdigest(),account['token']
+ def test_contacts_require_explicit_discovery_and_verified_email(self):
+  name,email,digest,token=self.contact_account();viewer=self.tokens['alice'];query={'hashes':[digest]}
+  self.assertFalse(self.request('/contacts/settings',token=token)[1]['discoverable'])
+  self.assertEqual(self.request('/contacts/discover',query,viewer)[1]['matches'],[])
+  self.assertEqual(self.request('/contacts/settings',{'discoverable':True},token)[0],200)
+  status,result=self.request('/contacts/discover',query,viewer);self.assertEqual(status,200,result);self.assertEqual(len(result['matches']),1)
+  match=result['matches'][0];self.assertEqual(match['user']['nick'],name);self.assertEqual(match['hash'],digest);self.assertNotIn('email',match['user']);self.assertNotIn('password',match['user'])
+  self.assertEqual(self.request('/contacts/discover',query,token)[1]['matches'],[])
+  with self.mod.LOCK:self.mod.DB.execute('UPDATE emails SET verified=0 WHERE nick=?',(name,));self.mod.DB.commit()
+  self.assertEqual(self.request('/contacts/discover',query,viewer)[1]['matches'],[])
+  self.assertEqual(self.request('/contacts/discover',query,token)[0],403)
+ def test_contacts_optout_blocking_and_request_limits(self):
+  name,email,digest,token=self.contact_account();viewer=self.tokens['alice'];query={'hashes':[digest]}
+  self.request('/contacts/settings',{'discoverable':True},token)
+  self.request('/blocks',{'target':'alice','blocked':True},token);self.assertEqual(self.request('/contacts/discover',query,viewer)[1]['matches'],[])
+  self.request('/blocks',{'target':'alice','blocked':False},token);self.assertEqual(len(self.request('/contacts/discover',query,viewer)[1]['matches']),1)
+  self.request('/contacts/settings',{'discoverable':False},token);self.assertEqual(self.request('/contacts/discover',query,viewer)[1]['matches'],[])
+  self.assertEqual(self.request('/contacts/discover',query)[0],401)
+  for values in ([digest]*257,['plain-email@example.test'],[123],None):self.assertEqual(self.request('/contacts/discover',{'hashes':values},viewer)[0],400)
+  self.mod.LIMITS.clear()
+  for _ in range(20):self.assertEqual(self.request('/contacts/discover',{'hashes':[]},viewer)[0],200)
+  self.assertEqual(self.request('/contacts/discover',{'hashes':[]},viewer)[0],429)
  def test_registration_numbers_concurrent_and_restart(self):
   initial=self.mod.DB.execute('SELECT MAX(number) FROM account_numbers').fetchone()[0]
   def register(i):

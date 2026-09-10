@@ -100,6 +100,13 @@ grep -q 'OLDY_CALL_PASS' build/call-results.txt
 timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.ExperienceInstrumentation > build/experience-results.txt
 cat build/experience-results.txt
 grep -q OLDY_EXPERIENCE_PASS build/experience-results.txt
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.WallpaperInstrumentation > build/wallpaper-results.txt
+cat build/wallpaper-results.txt
+grep -q OLDY_WALLPAPER_PASS build/wallpaper-results.txt
+
+timeout 150s adb shell am instrument -w chat.oldy.tests/chat.oldy.PrivacyInstrumentation > build/privacy-results.txt
+cat build/privacy-results.txt
+grep -q OLDY_PRIVACY_PASS build/privacy-results.txt
 adb pull /sdcard/Android/data/chat.oldy/files/review/. build/screenshots/
 adb logcat -d -s AndroidRuntime:E > build/android-errors.log
 if grep -q 'FATAL EXCEPTION' build/android-errors.log; then cat build/android-errors.log; exit 1; fi
