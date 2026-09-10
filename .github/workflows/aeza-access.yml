@@ -1,0 +1,28 @@
+name: Check new Aeza media VPS (read only)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/aeza-access.yml'
+      - 'tools/aeza/**'
+permissions:
+  contents: read
+concurrency:
+  group: aeza-media-access
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.repository == 'maxfilov4/oldy-chat' && github.actor == 'maxfilov4' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check SSH and YouTube reachability without changing the VPS
+        env:
+          AEZA_SSH_PRIVATE_KEY: ${{ secrets.AEZA_SSH_PRIVATE_KEY }}
+          AEZA_SSH_KNOWN_HOSTS: ${{ secrets.AEZA_SSH_KNOWN_HOSTS }}
+          AEZA_SSH_USER: ${{ secrets.AEZA_SSH_USER }}
+          AEZA_SSH_KEY_PASSPHRASE: ${{ secrets.AEZA_SSH_KEY_PASSPHRASE }}
+        run: python3 tools/aeza/check_access.py
