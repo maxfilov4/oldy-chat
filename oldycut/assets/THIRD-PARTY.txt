@@ -1,0 +1,10 @@
+Oldy Cut uses third-party components, distributed under their respective licenses.
+
+Qt / PySide6 / Shiboken6 6.8.3: Qt Company and contributors, LGPL v3/GPL v3 (with applicable exceptions). Dynamic libraries remain separate in the app bundle. Source and notices: https://code.qt.io/cgit/pyside/pyside-setup.git/ ; https://download.qt.io/archive/qt/6.8/6.8.3/single/
+imageio-ffmpeg 0.6.0: BSD-2-Clause, https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0
+FFmpeg is a separate executable invoked by subprocess. The bundled imageio executable may include GPL codecs x264/x265. Build scripts and corresponding source locations: https://github.com/imageio/imageio-ffmpeg/tree/v0.6.0/binaries ; https://github.com/imageio/ffmpeg-binaries ; https://ffmpeg.org/download.html
+Qt Multimedia additionally includes its own LGPL FFmpeg libraries. Qt notices are included with the distribution.
+Pillow: HPND; requests: Apache-2.0; keyring: MIT; Python: PSF. Distribution-provided notices are copied into assets/licenses at build time.
+DejaVu fonts: Bitstream Vera license with DejaVu changes in the public domain. See DejaVu-LICENSE.txt.
+
+This private prototype is supplied with its editable Python source. No restriction is imposed on replacing or debugging the included LGPL libraries for the user's own modifications. Third-party license notices take precedence for those components.
