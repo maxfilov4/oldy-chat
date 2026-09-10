@@ -3,7 +3,7 @@ import android.app.*;import android.content.*;import android.net.Uri;import andr
 
 /** Offline documents and explicit, separately scoped consent; no global access to private chats. */
 final class LegalCenter {
- static final String VERSION="2026-09-10.1";
+ static final String VERSION="2026-09-10.2";
  static String tr(String ru,String en){return I18n.language().equals("en")?en:ru;}
  static JSONObject documents(MainActivity a)throws Exception{try(InputStream in=a.getAssets().open("legal_texts.json")){return new JSONObject(Api.read(in,60000)).getJSONObject(I18n.language().equals("en")?"en":"ru");}}
  static void document(MainActivity a,String key){try{JSONObject doc=documents(a).getJSONObject(key);LinearLayout body=a.col();a.pad(body,18);JSONArray paragraphs=doc.getJSONArray("body");for(int i=0;i<paragraphs.length();i++){TextView text=a.label(paragraphs.getString(i),14,a.TEXT);text.setTextIsSelectable(true);text.setLineSpacing(a.dp(4),1);body.addView(text);a.space(body,14);}ScrollView scroll=new ScrollView(a);scroll.addView(body);a.dialog().setTitle(doc.getString("title")).setView(scroll).setPositiveButton(I18n.t("Закрыть"),null).show();}catch(Exception e){a.error(Api.message(e));}}

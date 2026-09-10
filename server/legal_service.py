@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-VERSION='2026-09-10.1'
+VERSION='2026-09-10.2'
 REASONS=('spam','harassment','violence','sexual_content','child_safety','impersonation','copyright','other')
 UGC={'/send','/room/create','/room/update','/profile','/posts/register','/channels/history/store','/videos/start','/videos/cover','/videos/finish','/blobs/create','/blobs/finish','/stickers/offers','/stickers/generate'}
 

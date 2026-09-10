@@ -46,7 +46,7 @@ class CallPeer:
    self.rsa=await asyncio.to_thread(rsa.generate_private_key,public_exponent=65537,key_size=3072);self.ec=ec.generate_private_key(ec.SECP256R1())
    pub=lambda key:b64(key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo))
    ticket=await self.api('/signup/request',{'email':'voice_test@example.test'});code=await self.api('/test-code?email=voice_test@example.test')
-   reply=await self.api('/register',{'policy_version':'2026-09-10.1','nick':'voice_test','name':'Voice test peer','password':uuid.uuid4().hex,'email':'voice_test@example.test','ticket':ticket['ticket'],'code':code['code'],'enc':pub(self.rsa),'sig':pub(self.ec)})
+   reply=await self.api('/register',{'policy_version':'2026-09-10.2','nick':'voice_test','name':'Voice test peer','password':uuid.uuid4().hex,'email':'voice_test@example.test','ticket':ticket['ticket'],'code':code['code'],'enc':pub(self.rsa),'sig':pub(self.ec)})
    self.token=reply['token'];self.ready=True
    while True:
     for e in (await self.api('/poll'))['messages']:
