@@ -37,7 +37,7 @@ install -d -o root -g root -m 755 /opt/oldy-chat
 install -d -o oldy-chat -g oldy-chat -m 700 /var/lib/oldy-chat
 install -d -o root -g oldy-chat -m 750 /etc/oldy-chat
 install -o root -g root -m 644 "$oldy_src/server.py" /opt/oldy-chat/server.py
-for oldy_legal_file in legal_service.py legal_texts.json configure-legal.py retention.py sticker_generation.py configure-stickers.py; do
+for oldy_legal_file in legal_service.py legal_texts.json configure-legal.py retention.py sticker_generation.py configure-stickers.py sticker_diagnostics.py; do
  install -o root -g root -m 644 "$oldy_src/$oldy_legal_file" "/opt/oldy-chat/$oldy_legal_file"
 done
 python3 /opt/oldy-chat/configure-stickers.py --enable-all --no-restart

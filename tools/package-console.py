@@ -20,7 +20,7 @@ except BlockingIOError:raise SystemExit('Обновление уже выпол�
 release=META
 publish_only=PUBLISH_ONLY
 PUBLISHER
-archive_name='OldyChat-0.6.3-server.tar.gz'
+archive_name='OldyChat-0.6.4-server.tar.gz'
 cache=pathlib.Path('/root')/archive_name
 with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
  folder=pathlib.Path(tmp);bundle=None
@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
   data=cache.read_bytes()
   if hashlib.sha256(data).hexdigest()==release['bundle_sha256']:bundle=data
  if bundle is None:
-  print('Скачиваем OldЫ Chat 0.6.3…',flush=True);downloaded=folder/'release.zip'
+  print('Скачиваем OldЫ Chat 0.6.4…',flush=True);downloaded=folder/'release.zip'
   for attempt in range(3):
    digest=hashlib.sha256();length=0
    try:
@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
    if member.file_size>180000000:raise SystemExit('Неверный размер архива.')
    bundle=zipped.read(member)
  if hashlib.sha256(bundle).hexdigest()!=release['bundle_sha256']:raise SystemExit('Проверка архива не пройдена. Сервер не изменён.')
- expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py','sticker_generation.py','configure-stickers.py','release.json'}
+ expected={'OldyChat-latest.apk','server.py','install.sh','configure-mail.py','disk_storage.py','configure-disk.py','legal_service.py','legal_texts.json','configure-legal.py','retention.py','sticker_generation.py','configure-stickers.py','sticker_diagnostics.py','release.json'}
  with tarfile.open(fileobj=io.BytesIO(bundle),mode='r:gz') as tar:
   members=tar.getmembers()
   if len(members)!=len(expected) or {m.name for m in members}!=expected or not all(m.isfile() and m.size<180000000 for m in members):raise SystemExit('Неверный состав выпуска.')
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
      if not chunk:break
      target.write(chunk)
  manifest=json.loads((folder/'release.json').read_text());apk=folder/'OldyChat-latest.apk'
- if manifest['package']!='chat.oldy' or manifest['version_code']!=12 or manifest['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or manifest['size']!=apk.stat().st_size:raise SystemExit('Проверка APK не пройдена. Сервер не изменён.')
+ if manifest['package']!='chat.oldy' or manifest['version_code']!=13 or manifest['sha256']!=hashlib.sha256(apk.read_bytes()).hexdigest() or manifest['size']!=apk.stat().st_size:raise SystemExit('Проверка APK не пройдена. Сервер не изменён.')
  cached=cache.with_suffix('.download');cached.write_bytes(bundle);cached.chmod(0o600);os.replace(cached,cache)
  if publish_only:
   if not pathlib.Path('/etc/oldy-chat/server.crt').is_file() or not pathlib.Path('/var/lib/oldy-chat').is_dir():raise SystemExit('Сначала установи сервер OldЫ Chat.')
@@ -82,10 +82,10 @@ with tempfile.TemporaryDirectory(prefix='oldy-update-') as tmp:
   verify_update('https://5.42.102.11',manifest,context=ctx)
   verify_update('https://5.42.102.11:8443',manifest,context=ctx,download=False)
  except Exception as error:raise SystemExit('Проверка обновления не пройдена: '+str(error)+'. Пришли этот вывод; приложение удалять не нужно.')
- print('OLDY CHAT: UPDATE AVAILABLE 0.6.3-beta',flush=True)
+ print('OLDY CHAT: UPDATE AVAILABLE 0.6.4-beta',flush=True)
  print('Теперь в текущем приложении: Настройки → Обновления → Обновить. Удалять приложение не нужно.',flush=True)
  if not pathlib.Path('/etc/oldy-chat/mail.env').exists():print('Для писем с кодом выполни: python3 /opt/oldy-chat/configure-mail.py',flush=True)
 '''.replace('META',repr({k:meta[k] for k in ('url','zip_sha256','bundle_sha256')})).replace('PUBLISH_ONLY',repr(args.publish_only)).replace('PUBLISHER',Path(__file__).with_name('update-publisher.py').read_text())
 ast.parse(script)
-args.output.write_text("python3 - <<'OLDY_UPDATE_063'\n"+script+"OLDY_UPDATE_063\n")
+args.output.write_text("python3 - <<'OLDY_UPDATE_064'\n"+script+"OLDY_UPDATE_064\n")
 print(json.dumps({'file':str(args.output),'bytes':args.output.stat().st_size,'sha256':hashlib.sha256(args.output.read_bytes()).hexdigest()}))

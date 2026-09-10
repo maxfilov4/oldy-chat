@@ -68,11 +68,13 @@ def provider_error(error):
  # Return only our fixed public codes, never the provider body (which can echo input).
  try:
   payload=json.loads(error.read(16384)).get('error',{})
-  code=str(payload.get('code',''));kind=str(payload.get('type',''))
- except Exception:code=kind=''
+  code=str(payload.get('code',''));kind=str(payload.get('type',''));message=str(payload.get('message','')).lower()
+ except Exception:code=kind=message=''
+ if code in ('unsupported_country_region_territory','country_not_supported'):return 'PROVIDER_REGION'
+ if code in ('insufficient_permissions','insufficient_scope') or 'missing scopes' in message or 'insufficient permissions' in message:return 'PROVIDER_SCOPE'
  if code in ('insufficient_quota','billing_hard_limit_reached','billing_not_active') or kind=='insufficient_quota':return 'PROVIDER_BILLING'
  if code in ('model_not_found','model_not_available'):return 'PROVIDER_MODEL'
- if code in ('organization_verification_required','verification_required'):return 'PROVIDER_VERIFICATION'
+ if code in ('organization_verification_required','verification_required') or 'organization must be verified' in message or 'verify your organization' in message:return 'PROVIDER_VERIFICATION'
  if code in ('content_policy_violation','moderation_blocked'):return 'PROVIDER_REJECTED'
  return {400:'PROVIDER_REJECTED',401:'PROVIDER_CREDENTIALS',403:'PROVIDER_ACCESS',429:'PROVIDER_LIMIT'}.get(error.code,'PROVIDER_UNAVAILABLE')
 
