@@ -1,0 +1,42 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="14" android:versionName="0.6.5-beta">
+ <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36"/>
+ <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.READ_CONTACTS"/>
+ <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+ <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"/>
+ <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+ <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+ <uses-permission android:name="android.permission.CAMERA"/>
+ <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
+ <uses-permission android:name="android.permission.WAKE_LOCK"/>
+ <uses-permission android:name="android.permission.VIBRATE"/>
+ <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+ <queries><intent><action android:name="android.support.customtabs.action.CustomTabsService"/></intent></queries>
+ <application android:name=".OldyApplication" android:label="OldЫ Chat" android:theme="@style/AppTheme" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
+  <activity android:name=".YouTubeHubActivity" android:exported="false"/>
+  <activity android:name=".StickerEditorActivity" android:exported="false"/>
+  <activity android:name=".AudioLabActivity" android:exported="false"/>
+  <activity android:name=".OldiYouTubePlayer" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden"/>
+  <service android:name=".LocalTunnelService" android:process=":youtube_tunnel" android:exported="true" android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="specialUse">
+   <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+   <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false"/>
+   <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-initiated local per-app YouTube network relay; no remote VPN endpoint"/>
+  </service>
+  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+   <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="oldy" android:host="comments"/></intent-filter>
+  </activity>
+  <activity android:name=".CallActivity" android:exported="false"/>
+  <receiver android:name=".CallActionReceiver" android:exported="false"/>
+  <activity android:name=".VideoActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:screenOrientation="fullSensor"/>
+  <activity android:name=".RoundReviewActivity" android:exported="false"/>
+  <activity android:name=".RoundActivity" android:exported="false" android:screenOrientation="portrait"/>
+  <provider android:name=".UpdateProvider" android:authorities="chat.oldy.updates" android:exported="false" android:grantUriPermissions="true"/>
+  <service android:name=".ChatService" android:exported="false" android:foregroundServiceType="remoteMessaging|microphone"/>
+ </application>
+</manifest>

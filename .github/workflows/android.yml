@@ -1,0 +1,119 @@
+name: Build and verify Android beta
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oldy-beta-build
+  cancel-in-progress: true
+jobs:
+  android:
+    if: github.actor == 'maxfilov4' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore beta signing identity
+        uses: actions/cache@v4
+        with:
+          path: .keys
+          key: oldy-beta-signing-v1
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Prepare isolated call relay and video tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y coturn ffmpeg
+          sudo systemctl stop coturn
+      - name: Server tests
+        run: |
+          python3 -m pip install cryptography pillow aiortc==1.15.0 vosk==0.3.45
+          python3 -m unittest discover -s tests -v
+      - name: Verify local audio processing
+        run: |
+          mkdir -p build/dsp
+          javac -d build/dsp app/src/main/java/chat/oldy/AudioDsp.java tests/AudioDspCheck.java app/src/main/java/chat/oldy/YouTubeLinkDetector.java tests/YouTubeLinkCheck.java
+          java -cp build/dsp chat.oldy.AudioDspCheck
+          java -cp build/dsp chat.oldy.YouTubeLinkCheck
+      - name: Build signed APK
+        run: bash tools/build-apk.sh
+      - name: Free completed build intermediates for Android emulator
+        run: |
+          test -s build/OldyChat-beta.apk
+          test -s build/OldyChat-tests.apk
+          test -s build/OldyChat-Play.aab
+          rm -rf app/build/intermediates app/build/.cxx .native
+          df -h .
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_2
+          disk-size: 4096M
+          ram-size: 3072M
+          heap-size: 512M
+          emulator-boot-timeout: 240
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-front emulated -camera-back emulated
+          disable-animations: true
+          script: bash tools/smoke.sh
+      - name: Package installer
+        if: always()
+        run: |
+          python3 tools/package-installer.py
+          python3 tools/package-release.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OldyChat-beta
+          path: |
+            build/OldyChat-beta.apk
+            build/OldyChat-Play.aab
+            build/speech-results.txt
+            build/speech-reference-results.json
+            build/legal-ui-results.txt
+            build/Server-maintenance-only.txt
+            build/OldyChat-0.6.5-server.tar.gz
+            build/release/release.json
+            build/design-results.txt
+            build/video-results.txt
+            build/update-results.txt
+            build/capture-results.txt
+            build/refresh-results.txt
+            build/experience-results.txt
+            build/wallpaper-results.txt
+            build/privacy-results.txt
+            build/youtube-results.txt
+            build/local-tunnel-results.txt
+            build/dpi-results.txt
+            build/upgrade-results.txt
+            build/signing-certificate.txt
+            build/channel-results.txt
+            build/capture-debug.log
+            build/call-results.txt
+            build/device-server.log
+            build/test-turn.log
+            build/screenshots
+            build/android-errors.log
+            build/crypto-results.txt
+            build/feature-results.txt
+            build/screen-off-results.txt
+            build/window.xml
+            build/chats.xml
+            build/conversation.xml
+          retention-days: 30

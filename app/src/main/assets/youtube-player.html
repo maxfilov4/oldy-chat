@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; style-src 'unsafe-inline'; img-src https://i.ytimg.com data:; connect-src https://www.youtube.com; base-uri 'none'; form-action 'none'">
+<style>html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}#player{width:100%;height:100%;min-height:200px}</style></head><body><div id="player"></div>
+<script>
+'use strict';
+const config=__OLDI_CONFIG__;
+window.oldiPlayer=null;let ready=false,error=0;
+function onYouTubeIframeAPIReady(){const vars={playsinline:1,controls:1,fs:1,autoplay:0,enablejsapi:1,origin:'https://chat.oldy',hl:config.hl,start:config.start};if(config.playlistId){vars.listType='playlist';vars.list=config.playlistId;}
+ window.oldiPlayer=new YT.Player('player',{width:'100%',height:'100%',videoId:config.videoId||undefined,playerVars:vars,events:{onReady:()=>{ready=true;},onError:event=>{error=Number(event.data)||-1;},onStateChange:event=>{if(event.data===1)error=0;}}});}
+window.oldiSnapshot=function(){if(!ready||!window.oldiPlayer)return {ready:false,error:error};const d=oldiPlayer.getVideoData();return {ready:true,error:error,id:d.video_id||'',title:(d.title||'').substring(0,300),position:oldiPlayer.getCurrentTime(),duration:oldiPlayer.getDuration(),state:oldiPlayer.getPlayerState()};};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&window.oldiPlayer&&ready)oldiPlayer.pauseVideo();});
+</script><script src="https://www.youtube.com/iframe_api"></script></body></html>
